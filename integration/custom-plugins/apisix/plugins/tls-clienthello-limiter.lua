@@ -277,6 +277,12 @@ function _M.init()
         core.log.error("tls-clienthello-limiter: failed to create per-domain limiter: ", err)
     end
 
+    -- Load custom-metrics (init is called in init_worker_by_lua context)
+    local ok, m = pcall(require, "custom-metrics")
+    if ok then
+        metrics = m
+    end
+
     -- Wrap the global apisix.ssl_client_hello_phase
     if apisix and apisix.ssl_client_hello_phase then
         original_ssl_client_hello_phase = apisix.ssl_client_hello_phase
@@ -291,15 +297,11 @@ end
 
 
 function _M.init_worker()
-    -- Start the custom metrics TTL sweeper
-    local ok, m = pcall(require, "custom-metrics")
-    if ok then
-        metrics = m
-        m.start_sweeper()
+    -- Start the custom metrics TTL sweeper (metrics loaded in init)
+    if metrics then
+        metrics.start_sweeper()
         core.log.warn("tls-clienthello-limiter: started custom-metrics sweeper "
-            .. "(ttl=", m.default_ttl, "s, interval=", m.sweep_interval, "s)")
-    else
-        core.log.error("tls-clienthello-limiter: failed to load custom-metrics: ", m)
+            .. "(ttl=", metrics.default_ttl, "s, interval=", metrics.sweep_interval, "s)")
     end
 end
 
