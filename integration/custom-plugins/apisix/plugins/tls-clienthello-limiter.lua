@@ -15,7 +15,6 @@
 
 local limit_req    = require("resty.limit.req")
 local ssl_clt      = require("ngx.ssl.clienthello")
-local ssl_mod      = require("ngx.ssl")  -- kept until Task 3 rewrites hot path
 local core         = require("apisix.core")
 local plugin       = require("apisix.plugin")
 local ipmatcher    = require("resty.ipmatcher")
@@ -158,40 +157,34 @@ function _M.check_schema(conf)
 end
 
 
---- Rate-limited ssl_client_hello_phase wrapper
+--- Rate-limited ssl_client_hello_phase wrapper (optimized hot path)
 local function rate_limited_ssl_client_hello_phase()
-    -- Lazy-load metrics on first call (init_worker must have run)
-    if not metrics then
-        local ok, m = pcall(require, "custom-metrics")
-        if ok then
-            metrics = m
-        end
-    end
-
-    -- In ssl_client_hello phase, ngx.var is NOT available.
-    -- Use ngx.ssl.raw_client_addr() to get the client IP instead.
-    local addr_data, addr_type, err = ssl_mod.raw_client_addr()
-    if not addr_data then
-        -- Cannot identify client — let APISIX handle it
-        return original_ssl_client_hello_phase()
-    end
-    local ip_text
-    if addr_type == "inet" then
-        ip_text = string.format("%d.%d.%d.%d", addr_data:byte(1, 4))
-    elseif addr_type == "inet6" then
-        -- simplified: use hex representation for IPv6
-        local t = {}
-        for i = 1, 16, 2 do
-            t[#t + 1] = string.format("%x", addr_data:byte(i) * 256 + addr_data:byte(i + 1))
-        end
-        ip_text = table.concat(t, ":")
-    else
+    -- FFI: extract binary client IP (no text formatting, no Lua string for sockaddr)
+    local addr_ptr, addr_len, addr_type = extract_client_ip()
+    if not addr_ptr then
         return original_ssl_client_hello_phase()
     end
 
-    -- Extract SNI before any checks (needed for per-domain limiting)
-    local sni, err = ssl_clt.get_client_hello_server_name()
-    local domain   = sni or "no_sni"
+    -- Binary key for blocklist (4 bytes IPv4, 16 bytes IPv6 — minimal allocation)
+    local bin_key = ffi_str(addr_ptr, addr_len)
+
+    -- Extract SNI before any checks (needed for per-domain limiting and metrics)
+    local sni = ssl_clt.get_client_hello_server_name()
+    local domain = sni or "no_sni"
+
+    -- T0: TLS IP blocklist (fast path — binary key, no text formatting)
+    if cached_blocklist_dict and cached_blocklist_dict:get(bin_key) then
+        if metrics then
+            metrics.inc_counter("tls_clienthello_blocked_total", {reason = "blocklist"})
+        end
+        return ngx_exit(ngx.ERROR)
+    end
+
+    -- Past blocklist — now we need text IP for whitelist and rate limiting
+    local ip_text = binary_to_text_ip(addr_ptr, addr_len, addr_type)
+    if not ip_text then
+        return original_ssl_client_hello_phase()
+    end
 
     -- Whitelist bypass (Lua-native ipmatcher — geo/map vars not available in TLS phase)
     if whitelist_matcher and whitelist_matcher:match(ip_text) then
@@ -202,24 +195,14 @@ local function rate_limited_ssl_client_hello_phase()
         return original_ssl_client_hello_phase()
     end
 
-    -- T0: TLS IP blocklist (fast path, keyed on text IP)
-    local tbl = ngx.shared[DICT_BLOCKLIST]
-    if tbl and tbl:get(ip_text) then
-        if metrics then
-            metrics.inc_counter("tls_clienthello_blocked_total", {reason = "blocklist"})
-        end
-        return ngx_exit(ngx.ERROR)
-    end
-
-    -- T1: Per-IP ClientHello rate
-    local lim_ip, lerr = limit_req.new(DICT_PER_IP, conf.per_ip_rate, conf.per_ip_burst)
-    if lim_ip then
-        local delay, rerr = lim_ip:incoming(ip_text, true)
+    -- T1: Per-IP ClientHello rate (cached limiter object)
+    if cached_lim_ip then
+        local delay, rerr = cached_lim_ip:incoming(ip_text, true)
         if not delay then
             if rerr == "rejected" then
-                -- Auto-block this IP
-                if tbl then
-                    tbl:set(ip_text, true, conf.block_ttl)
+                -- Auto-block this IP with binary key
+                if cached_blocklist_dict then
+                    cached_blocklist_dict:set(bin_key, true, conf.block_ttl)
                 end
                 if metrics then
                     metrics.inc_counter("tls_clienthello_rejected_total", {layer = "per_ip"})
@@ -235,11 +218,10 @@ local function rate_limited_ssl_client_hello_phase()
         end
     end
 
-    -- T2: Per-SNI-domain ClientHello rate
+    -- T2: Per-SNI-domain ClientHello rate (cached limiter object)
     if sni then
-        local lim_dom, lerr = limit_req.new(DICT_PER_DOMAIN, conf.per_domain_rate, conf.per_domain_burst)
-        if lim_dom then
-            local delay, rerr = lim_dom:incoming(sni, true)
+        if cached_lim_dom then
+            local delay, rerr = cached_lim_dom:incoming(sni, true)
             if not delay then
                 if rerr == "rejected" then
                     if metrics then
