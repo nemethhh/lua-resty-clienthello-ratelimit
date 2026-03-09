@@ -15,15 +15,18 @@ if [ ! -f "$CERTS_DIR/server.crt" ]; then
 fi
 
 # Render apisix.yaml from template with indented cert/key
-CERT=$(sed 's/^/      /' "$CERTS_DIR/server.crt")
-KEY=$(sed 's/^/      /' "$CERTS_DIR/server.key")
-
-sed -e "/__CERT__/{
-    r /dev/stdin
-    d
-}" <<< "$CERT" < "$CONF_DIR/apisix.yaml.tpl" | sed -e "/__KEY__/{
-    r /dev/stdin
-    d
-}" <<< "$KEY" > "$CONF_DIR/apisix.yaml"
+awk -v cert_file="$CERTS_DIR/server.crt" -v key_file="$CERTS_DIR/server.key" '
+/__CERT__/ {
+    while ((getline line < cert_file) > 0) print "      " line
+    close(cert_file)
+    next
+}
+/__KEY__/ {
+    while ((getline line < key_file) > 0) print "      " line
+    close(key_file)
+    next
+}
+{ print }
+' "$CONF_DIR/apisix.yaml.tpl" > "$CONF_DIR/apisix.yaml"
 
 echo "Generated: $CONF_DIR/apisix.yaml"
