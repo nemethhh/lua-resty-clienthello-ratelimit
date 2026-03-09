@@ -144,7 +144,12 @@ local DICT_BLOCKLIST  = "tls-ip-blocklist"
 -- Will hold the original function
 local original_ssl_client_hello_phase
 
--- Metrics library (loaded lazily to handle require order)
+-- Cached objects (populated in init)
+local cached_blocklist_dict   -- ngx.shared[DICT_BLOCKLIST]
+local cached_lim_ip           -- limit_req object for per-IP
+local cached_lim_dom          -- limit_req object for per-domain
+
+-- Metrics library (resolved in init_worker only)
 local metrics
 
 
@@ -275,8 +280,22 @@ function _M.init()
         if attr.block_ttl then conf.block_ttl = attr.block_ttl end
     end
 
+    -- Cache shared dict references
+    cached_blocklist_dict = ngx.shared[DICT_BLOCKLIST]
+
+    -- Cache limit_req objects (created once, not per-request)
+    local err
+    cached_lim_ip, err = limit_req.new(DICT_PER_IP, conf.per_ip_rate, conf.per_ip_burst)
+    if not cached_lim_ip then
+        core.log.error("tls-clienthello-limiter: failed to create per-ip limiter: ", err)
+    end
+
+    cached_lim_dom, err = limit_req.new(DICT_PER_DOMAIN, conf.per_domain_rate, conf.per_domain_burst)
+    if not cached_lim_dom then
+        core.log.error("tls-clienthello-limiter: failed to create per-domain limiter: ", err)
+    end
+
     -- Wrap the global apisix.ssl_client_hello_phase
-    -- `apisix` is a global set in init_by_lua_block (ngx_tpl.lua:512)
     if apisix and apisix.ssl_client_hello_phase then
         original_ssl_client_hello_phase = apisix.ssl_client_hello_phase
         apisix.ssl_client_hello_phase = rate_limited_ssl_client_hello_phase
