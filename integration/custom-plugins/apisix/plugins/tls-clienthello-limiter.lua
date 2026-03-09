@@ -15,17 +15,89 @@
 
 local limit_req    = require("resty.limit.req")
 local ssl_clt      = require("ngx.ssl.clienthello")
-local ssl_mod      = require("ngx.ssl")
+local ssl_mod      = require("ngx.ssl")  -- kept until Task 3 rewrites hot path
 local core         = require("apisix.core")
 local plugin       = require("apisix.plugin")
 local ipmatcher    = require("resty.ipmatcher")
 local ffi          = require("ffi")
+local C            = ffi.C
 local ffi_str      = ffi.string
+local ffi_cast     = ffi.cast
+local ffi_new      = ffi.new
+local get_request  = require("resty.core.base").get_request
+local str_format   = string.format
+local concat       = table.concat
 
 local ngx          = ngx
 local ngx_log      = ngx.log
 local ngx_ERR      = ngx.ERR
 local ngx_exit     = ngx.exit
+
+-- FFI declarations for direct raw_client_addr access
+ffi.cdef[[
+  struct sockaddr_in {
+      unsigned short  sin_family;
+      unsigned short  sin_port;
+      unsigned char   sin_addr[4];
+      unsigned char   sin_zero[8];
+  };
+  struct sockaddr_in6 {
+      unsigned short  sin6_family;
+      unsigned short  sin6_port;
+      unsigned int    sin6_flowinfo;
+      unsigned char   sin6_addr[16];
+      unsigned int    sin6_scope_id;
+  };
+  int ngx_http_lua_ffi_ssl_raw_client_addr(ngx_http_request_t *r,
+      char **addr, size_t *addrlen, int *addrtype, char **err);
+]]
+
+-- Pre-allocated FFI output buffers (reused across requests, safe: single-thread per worker)
+local addr_pp  = ffi_new("char*[1]")
+local sizep    = ffi_new("size_t[1]")
+local typep    = ffi_new("int[1]")
+local errmsgp  = ffi_new("char*[1]")
+
+-- addr_type constants from lua-resty-core (ngx/ssl.lua)
+local ADDR_TYPE_INET  = 1
+local ADDR_TYPE_INET6 = 2
+
+
+--- Extract binary client IP via FFI. Returns (addr_ptr, addr_len, addr_type) or nil.
+--- addr_ptr is a cdata pointer into the sockaddr — valid only for the current request.
+local function extract_client_ip()
+    local r = get_request()
+    if not r then return nil end
+
+    local rc = C.ngx_http_lua_ffi_ssl_raw_client_addr(r, addr_pp, sizep, typep, errmsgp)
+    if rc ~= 0 then return nil end
+
+    local atype = typep[0]
+    if atype == ADDR_TYPE_INET then
+        local sa = ffi_cast("struct sockaddr_in*", addr_pp[0])
+        return sa.sin_addr, 4, atype
+    elseif atype == ADDR_TYPE_INET6 then
+        local sa6 = ffi_cast("struct sockaddr_in6*", addr_pp[0])
+        return sa6.sin6_addr, 16, atype
+    end
+    return nil
+end
+
+
+--- Format binary IP address to text string (lazy — only called after blocklist miss).
+local function binary_to_text_ip(addr_ptr, addr_len, addr_type)
+    local b = ffi_cast("unsigned char*", addr_ptr)
+    if addr_type == ADDR_TYPE_INET then
+        return b[0] .. "." .. b[1] .. "." .. b[2] .. "." .. b[3]
+    elseif addr_type == ADDR_TYPE_INET6 then
+        local t = {}
+        for i = 0, 14, 2 do
+            t[#t + 1] = str_format("%x", b[i] * 256 + b[i + 1])
+        end
+        return concat(t, ":")
+    end
+    return nil
+end
 
 local plugin_name  = "tls-clienthello-limiter"
 
