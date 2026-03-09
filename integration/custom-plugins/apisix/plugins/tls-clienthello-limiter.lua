@@ -15,9 +15,12 @@
 
 local limit_req    = require("resty.limit.req")
 local ssl_clt      = require("ngx.ssl.clienthello")
+local ssl_mod      = require("ngx.ssl")
 local core         = require("apisix.core")
 local plugin       = require("apisix.plugin")
 local ipmatcher    = require("resty.ipmatcher")
+local ffi          = require("ffi")
+local ffi_str      = ffi.string
 
 local ngx          = ngx
 local ngx_log      = ngx.log
@@ -88,11 +91,24 @@ local function rate_limited_ssl_client_hello_phase()
         end
     end
 
-    -- In ssl_client_hello phase, ngx.var.binary_remote_addr may not be available.
-    -- Use ngx.var.remote_addr (text IP) as the rate-limit key instead.
-    local ip_text = ngx.var.remote_addr
-    if not ip_text then
+    -- In ssl_client_hello phase, ngx.var is NOT available.
+    -- Use ngx.ssl.raw_client_addr() to get the client IP instead.
+    local addr_data, addr_type, err = ssl_mod.raw_client_addr()
+    if not addr_data then
         -- Cannot identify client — let APISIX handle it
+        return original_ssl_client_hello_phase()
+    end
+    local ip_text
+    if addr_type == "inet" then
+        ip_text = string.format("%d.%d.%d.%d", addr_data:byte(1, 4))
+    elseif addr_type == "inet6" then
+        -- simplified: use hex representation for IPv6
+        local t = {}
+        for i = 1, 16, 2 do
+            t[#t + 1] = string.format("%x", addr_data:byte(i) * 256 + addr_data:byte(i + 1))
+        end
+        ip_text = table.concat(t, ":")
+    else
         return original_ssl_client_hello_phase()
     end
 

@@ -17,7 +17,7 @@ services:
     depends_on:
       - httpbin
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9092/healthz"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9092'"]
       interval: 2s
       timeout: 2s
       retries: 30

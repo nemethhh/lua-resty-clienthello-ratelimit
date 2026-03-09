@@ -11,14 +11,36 @@ apisix:
     listen:
       - port: 443
   extra_lua_path: "/usr/local/apisix/custom-plugins/?.lua"
-  plugins:
-    - tls-clienthello-limiter
-    - proxy-rewrite
-    - prometheus
+
+# Root-level plugins list (replaces defaults — must include all needed plugins)
+plugins:
+  - tls-clienthello-limiter       # custom plugin
+  - proxy-rewrite
+  - prometheus
+  - real-ip
+  - limit-conn
+  - limit-count
+  - limit-req
+  - redirect
+  - response-rewrite
+  - grpc-transcode
+  - grpc-web
+  - public-api
+  - serverless-pre-function
+  - serverless-post-function
+  - ext-plugin-pre-req
+  - ext-plugin-post-req
+  - ext-plugin-post-resp
+  - ip-restriction
+  - ua-restriction
+  - key-auth
+  - basic-auth
+  - jwt-auth
+  - consumer-restriction
 
 nginx_config:
-  meta:
-    lua_shared_dict:
+  http:
+    custom_lua_shared_dict:
       tls-hello-per-ip: 1m
       tls-hello-per-domain: 1m
       tls-ip-blocklist: 1m
@@ -39,7 +61,7 @@ nginx_config:
 
   http_end_configuration_snippet: |
     server {
-        listen 127.0.0.1:9092;
+        listen 0.0.0.0:9092;
         server_name _;
 
         location = /metrics {
