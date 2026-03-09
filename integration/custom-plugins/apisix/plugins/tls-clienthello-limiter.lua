@@ -148,7 +148,7 @@ local cached_blocklist_dict   -- ngx.shared[DICT_BLOCKLIST]
 local cached_lim_ip           -- limit_req object for per-IP
 local cached_lim_dom          -- limit_req object for per-domain
 
--- Metrics library (resolved in init_worker only)
+-- Metrics library (resolved in init)
 local metrics
 
 
@@ -168,17 +168,17 @@ local function rate_limited_ssl_client_hello_phase()
     -- Binary key for blocklist (4 bytes IPv4, 16 bytes IPv6 — minimal allocation)
     local bin_key = ffi_str(addr_ptr, addr_len)
 
-    -- Extract SNI before any checks (needed for per-domain limiting and metrics)
-    local sni = ssl_clt.get_client_hello_server_name()
-    local domain = sni or "no_sni"
-
-    -- T0: TLS IP blocklist (fast path — binary key, no text formatting)
+    -- T0: TLS IP blocklist (fast path — binary key, no text formatting, no SNI extraction)
     if cached_blocklist_dict and cached_blocklist_dict:get(bin_key) then
         if metrics then
             metrics.inc_counter("tls_clienthello_blocked_total", {reason = "blocklist"})
         end
         return ngx_exit(ngx.ERROR)
     end
+
+    -- Extract SNI (deferred past blocklist — not needed for blocked IPs)
+    local sni = ssl_clt.get_client_hello_server_name()
+    local domain = sni or "no_sni"
 
     -- Past blocklist — now we need text IP for whitelist and rate limiting
     local ip_text = binary_to_text_ip(addr_ptr, addr_len, addr_type)
