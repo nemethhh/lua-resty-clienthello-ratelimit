@@ -1,0 +1,5 @@
+integration/certs/server.crt
+integration/certs/server.key
+__pycache__/
+*.pyc
+.pytest_cache/
