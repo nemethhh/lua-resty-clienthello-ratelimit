@@ -1,0 +1,45 @@
+services:
+  httpbin:
+    image: ghcr.io/mccutchen/go-httpbin
+    networks:
+      - testnet
+
+  apisix:
+    image: apache/apisix:3.15.0-ubuntu
+    volumes:
+      - ./integration/conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./integration/conf/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+      - ./integration/custom-plugins:/usr/local/apisix/custom-plugins:ro
+    ports:
+      - "9080:80"
+      - "9443:443"
+      - "9092:9092"
+    depends_on:
+      - httpbin
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9092/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - testnet
+
+  test-runner:
+    build:
+      context: integration
+      dockerfile: Dockerfile.test-runner
+    depends_on:
+      apisix:
+        condition: service_healthy
+    environment:
+      APISIX_HTTP_URL: "http://apisix:80"
+      APISIX_HTTPS_HOST: "apisix"
+      APISIX_HTTPS_PORT: "443"
+      APISIX_METRICS_URL: "http://apisix:9092/metrics"
+      TEST_DOMAIN: "test.example.com"
+    networks:
+      - testnet
+
+networks:
+  testnet:
+    driver: bridge
