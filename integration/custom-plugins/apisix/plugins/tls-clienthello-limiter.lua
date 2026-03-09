@@ -32,8 +32,8 @@ local ngx_log      = ngx.log
 local ngx_ERR      = ngx.ERR
 local ngx_exit     = ngx.exit
 
--- FFI declarations for direct raw_client_addr access
-ffi.cdef[[
+-- FFI declarations for direct raw_client_addr access (pcall guards against redefinition)
+pcall(ffi.cdef, [[
   struct sockaddr_in {
       unsigned short  sin_family;
       unsigned short  sin_port;
@@ -49,7 +49,7 @@ ffi.cdef[[
   };
   int ngx_http_lua_ffi_ssl_raw_client_addr(ngx_http_request_t *r,
       char **addr, size_t *addrlen, int *addrtype, char **err);
-]]
+]])
 
 -- Pre-allocated FFI output buffers (reused across requests, safe: single-thread per worker)
 local addr_pp  = ffi_new("char*[1]")
