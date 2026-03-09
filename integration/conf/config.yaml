@@ -1,0 +1,94 @@
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+
+apisix:
+  node_listen:
+    - port: 80
+  ssl:
+    enable: true
+    listen:
+      - port: 443
+  extra_lua_path: "/usr/local/apisix/custom-plugins/?.lua"
+  plugins:
+    - tls-clienthello-limiter
+    - proxy-rewrite
+    - prometheus
+
+nginx_config:
+  meta:
+    lua_shared_dict:
+      tls-hello-per-ip: 1m
+      tls-hello-per-domain: 1m
+      tls-ip-blocklist: 1m
+      custom-metrics: 1m
+      custom-metrics-timestamps: 1m
+
+  http_configuration_snippet: |
+    geo $is_whitelisted {
+        default 0;
+        127.0.0.1 1;
+        ::1 1;
+    }
+
+    map $is_whitelisted $limit_key {
+        0 $binary_remote_addr;
+        1 "";
+    }
+
+  http_end_configuration_snippet: |
+    server {
+        listen 127.0.0.1:9092;
+        server_name _;
+
+        location = /metrics {
+            default_type text/plain;
+            content_by_lua_block {
+                local m = require("custom-metrics")
+
+                local dicts = {
+                    "tls-hello-per-ip", "tls-hello-per-domain",
+                    "tls-ip-blocklist", "custom-metrics",
+                }
+                for _, name in ipairs(dicts) do
+                    local d = ngx.shared[name]
+                    if d then
+                        local cap  = d:capacity()
+                        local free = d:free_space()
+                        if cap and free then
+                            m.set_gauge("ddos_shdict_capacity_bytes", cap,  {dict=name})
+                            m.set_gauge("ddos_shdict_free_bytes",     free, {dict=name})
+                            m.set_gauge("ddos_shdict_used_ratio",
+                                math.floor((1 - free/cap) * 10000) / 10000, {dict=name})
+                        end
+                    end
+                end
+
+                local tbl = ngx.shared["tls-ip-blocklist"]
+                if tbl then
+                    m.set_gauge("ddos_blocklist_entries", #tbl:get_keys(0), {layer="tls"})
+                end
+
+                local cm = ngx.shared["custom-metrics"]
+                if cm then
+                    m.set_gauge("ddos_metrics_key_count", #cm:get_keys(0))
+                end
+
+                ngx.say(m.serialize())
+            }
+        }
+
+        location = /healthz {
+            access_log off;
+            return 200 'ok';
+        }
+    }
+
+plugin_attr:
+  tls-clienthello-limiter:
+    per_ip_rate: 2
+    per_ip_burst: 4
+    per_domain_rate: 5
+    per_domain_burst: 10
+    block_ttl: 10

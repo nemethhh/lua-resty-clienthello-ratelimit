@@ -1,5 +1,6 @@
 integration/certs/server.crt
 integration/certs/server.key
+integration/conf/apisix.yaml
 __pycache__/
 *.pyc
 .pytest_cache/
