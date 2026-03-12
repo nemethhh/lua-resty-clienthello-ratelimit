@@ -4,3 +4,4 @@ integration/conf/apisix.yaml
 __pycache__/
 *.pyc
 .pytest_cache/
+.worktrees/
