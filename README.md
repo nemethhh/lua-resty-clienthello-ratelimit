@@ -217,39 +217,6 @@ The APISIX adapter:
 - monkey-patches `apisix.ssl_client_hello_phase`
 - restores the original phase handler in `destroy()`
 
-## Migration from v0.1
-
-v0.2 introduces a **breaking change**: rate limits no longer have defaults and must be explicitly configured using a nested format.
-
-**Before (v0.1):**
-
-```lua
-adapter.init({
-    per_ip_rate = 2,
-    per_ip_burst = 4,
-    per_domain_rate = 5,
-    per_domain_burst = 10,
-    block_ttl = 10,
-})
-```
-
-**After (v0.2):**
-
-```lua
-adapter.init({
-    per_ip = { rate = 2, burst = 4, block_ttl = 10 },
-    per_domain = { rate = 5, burst = 10 },
-})
-```
-
-Key changes:
-
-- Flat keys (`per_ip_rate`, `per_domain_rate`, etc.) are no longer accepted. The module detects old-style config and returns a helpful error.
-- Each tier (`per_ip`, `per_domain`) is optional. You can enable one, both, or neither.
-- If a tier is present, all its fields are required.
-- Custom shared dict names (`dict_per_ip`, `dict_per_domain`, `dict_blocklist`) are removed. Dict names are now fixed constants.
-- The core `new()` signature changed from `new(opts)` to `new(opts, metrics)`.
-
 ## Metrics
 
 Depending on traffic patterns and configuration, the limiter can emit:

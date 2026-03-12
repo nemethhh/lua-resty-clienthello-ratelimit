@@ -1,9 +1,9 @@
 package = "lua-resty-clienthello-ratelimit"
-version = "0.1.0-1"
+version = "0.2.0-1"
 
 source = {
     url = "git+https://github.com/nemethhh/lua-resty-clienthello-ratelimit.git",
-    tag = "v0.1.0",
+    tag = "v0.2.0",
 }
 
 description = {
