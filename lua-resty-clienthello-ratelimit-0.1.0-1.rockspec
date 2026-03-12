@@ -25,6 +25,7 @@ build = {
     type = "builtin",
     modules = {
         ["resty.clienthello.ratelimit"]            = "lib/resty/clienthello/ratelimit/init.lua",
+        ["resty.clienthello.ratelimit.config"]     = "lib/resty/clienthello/ratelimit/config.lua",
         ["resty.clienthello.ratelimit.openresty"]  = "lib/resty/clienthello/ratelimit/openresty.lua",
         ["resty.clienthello.ratelimit.apisix"]     = "lib/resty/clienthello/ratelimit/apisix.lua",
     },
