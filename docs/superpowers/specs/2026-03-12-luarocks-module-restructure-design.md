@@ -53,8 +53,12 @@ lua-resty-clienthello-ratelimit/
 │   │       └── tls_limiter_core_spec.lua
 │   │
 │   ├── integration/                      # APISIX integration tests
+│   │   ├── Dockerfile.apisix             # Custom APISIX image (luarocks make)
 │   │   ├── certs/
 │   │   ├── conf/
+│   │   │   ├── config.yaml
+│   │   │   ├── apisix.yaml.tpl
+│   │   │   └── apisix.yaml              # Generated
 │   │   ├── custom-plugins/
 │   │   │   └── apisix/plugins/
 │   │   │       └── tls-clienthello-limiter.lua
@@ -71,17 +75,18 @@ lua-resty-clienthello-ratelimit/
 │       │   ├── Dockerfile
 │       │   └── nginx.conf
 │       ├── Dockerfile.test-runner
-│       ├── tests/
-│       │   ├── conftest.py
-│       │   ├── test_openresty_healthz.py
-│       │   ├── test_openresty_tls_rate_limit.py
-│       │   ├── test_openresty_metrics.py
-│       │   └── requirements.txt
-│       └── certs/                        # Shared with t/integration/certs/
+│       └── tests/
+│           ├── conftest.py
+│           ├── test_openresty_healthz.py
+│           ├── test_openresty_tls_rate_limit.py
+│           ├── test_openresty_metrics.py
+│           └── requirements.txt
 │
 ├── docs/
 │   ├── plans/
 │   └── superpowers/
+│       ├── plans/
+│       └── specs/
 │
 └── .gitignore
 ```
@@ -107,16 +112,30 @@ lua-resty-clienthello-ratelimit/
 | Current path | New path |
 |---|---|
 | `unit/` | `t/unit/` |
-| `integration/tests/` | `t/integration/tests/` |
-| `integration/conf/` | `t/integration/conf/` |
+| `integration/tests/conftest.py` | `t/integration/tests/conftest.py` |
+| `integration/tests/test_healthz.py` | `t/integration/tests/test_healthz.py` |
+| `integration/tests/test_tls_rate_limit.py` | `t/integration/tests/test_tls_rate_limit.py` |
+| `integration/tests/requirements.txt` | `t/integration/tests/requirements.txt` |
+| `integration/conf/config.yaml` | `t/integration/conf/config.yaml` |
+| `integration/conf/apisix.yaml.tpl` | `t/integration/conf/apisix.yaml.tpl` |
+| `integration/conf/apisix.yaml` | `t/integration/conf/apisix.yaml` |
 | `integration/certs/` | `t/integration/certs/` |
 | `integration/generate-conf.sh` | `t/integration/generate-conf.sh` |
 | `integration/Dockerfile.test-runner` | `t/integration/Dockerfile.test-runner` |
-| `integration/openresty-tests/` | `t/openresty-integration/tests/` |
 | `integration/openresty-conf/Dockerfile` | `t/openresty-integration/conf/Dockerfile` |
 | `integration/openresty-conf/nginx.conf` | `t/openresty-integration/conf/nginx.conf` |
-| `integration/openresty-tests/Dockerfile.test-runner` | `t/openresty-integration/Dockerfile.test-runner` |
+| `integration/openresty-tests/conftest.py` | `t/openresty-integration/tests/conftest.py` |
+| `integration/openresty-tests/test_openresty_healthz.py` | `t/openresty-integration/tests/test_openresty_healthz.py` |
+| `integration/openresty-tests/test_openresty_tls_rate_limit.py` | `t/openresty-integration/tests/test_openresty_tls_rate_limit.py` |
+| `integration/openresty-tests/test_openresty_metrics.py` | `t/openresty-integration/tests/test_openresty_metrics.py` |
 | `integration/openresty-tests/requirements.txt` | `t/openresty-integration/tests/requirements.txt` |
+| `integration/openresty-tests/Dockerfile.test-runner` | `t/openresty-integration/Dockerfile.test-runner` |
+
+### New files
+
+| Path | Purpose |
+|---|---|
+| `t/integration/Dockerfile.apisix` | Custom APISIX image that runs `luarocks make` to install the module |
 
 ### Deleted
 
@@ -134,6 +153,8 @@ lua-resty-clienthello-ratelimit/
 | `docs/` | Existing design docs and specs |
 | `.gitignore` | Updated for new cert/config paths |
 | `reference/` | Development reference, .gitignored |
+
+**Note:** The `<owner>` placeholder in the rockspec `source.url` and `description.homepage` must be filled in before remote `luarocks install` works. The `luarocks make` local workflow works regardless.
 
 ## Rockspec
 
@@ -182,7 +203,8 @@ All internal `require()` calls update from old to new paths:
 | `openresty.lua` | `require("tls-clienthello-limiter.core")` | `require("resty.clienthello.ratelimit")` |
 | `apisix.lua` | `require("tls-clienthello-limiter.core")` | `require("resty.clienthello.ratelimit")` |
 | Unit test spec | `require("tls-clienthello-limiter.core")` | `require("resty.clienthello.ratelimit")` |
-| Unit test helpers | `package.loaded["tls-clienthello-limiter.core"]` | `package.loaded["resty.clienthello.ratelimit"]` |
+| Unit test helpers (`helpers.lua`) | `package.loaded["tls-clienthello-limiter.core"]` | `package.loaded["resty.clienthello.ratelimit"]` |
+| Unit test helpers (`helpers.lua`) | `package.loaded["custom-metrics"]` | Remove (dead reference) |
 | nginx.conf (OpenResty) | `require("tls-clienthello-limiter.adapters.openresty")` | `require("resty.clienthello.ratelimit.openresty")` |
 | APISIX plugin shim | `require("tls-clienthello-limiter.adapters.apisix")` | `require("resty.clienthello.ratelimit.apisix")` |
 
@@ -195,7 +217,7 @@ Every Dockerfile runs `luarocks make` from the rockspec to install the module. N
 ### Unit tests (`t/unit/Dockerfile`)
 
 ```dockerfile
-FROM openresty/openresty:1.21.4.3-jammy
+FROM openresty/openresty:jammy
 RUN luarocks install busted
 COPY . /src
 WORKDIR /src
@@ -208,32 +230,93 @@ The `unit/lua/` directory with the copied `core.lua` is deleted. The module is i
 
 ### APISIX integration tests
 
-The APISIX Docker service installs the module via `luarocks make`. The plugin shim at `t/integration/custom-plugins/apisix/plugins/tls-clienthello-limiter.lua` is a 3-liner delegating to the installed adapter:
+Currently APISIX uses the stock `apache/apisix:3.15.0-ubuntu` image with volume mounts for custom plugins. After restructuring, a custom Dockerfile is needed to run `luarocks make`.
+
+**New file: `t/integration/Dockerfile.apisix`**
+
+```dockerfile
+FROM apache/apisix:3.15.0-ubuntu
+COPY . /src
+RUN cd /src && luarocks make
+```
+
+The module is installed system-wide. The plugin shim at `t/integration/custom-plugins/apisix/plugins/tls-clienthello-limiter.lua` is a 3-liner delegating to the installed adapter:
 
 ```lua
 local adapter = require("resty.clienthello.ratelimit.apisix")
 return adapter
 ```
 
+**`config.yaml` change:** The `extra_lua_path` only needs to cover the plugin shim directory now (the module itself is installed via LuaRocks):
+
+```yaml
+# Before:
+extra_lua_path: "/usr/local/apisix/custom-plugins/?.lua"
+# After (shim still needed for APISIX plugin discovery):
+extra_lua_path: "/usr/local/apisix/custom-plugins/?.lua"
+```
+
+The value stays the same — APISIX needs the shim path to discover the plugin entry point. The shim delegates to the LuaRocks-installed adapter.
+
 ### OpenResty integration tests (`t/openresty-integration/conf/Dockerfile`)
 
 ```dockerfile
-FROM openresty/openresty:1.21.4.3-jammy
+FROM openresty/openresty:jammy
 RUN luarocks install nginx-lua-prometheus
 COPY . /src
 RUN cd /src && luarocks make
+COPY t/integration/certs/server.crt /etc/nginx/certs/server.crt
+COPY t/integration/certs/server.key /etc/nginx/certs/server.key
 COPY t/openresty-integration/conf/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+EXPOSE 443 9092
+CMD ["openresty", "-g", "daemon off;"]
 ```
 
-No `lua_package_path` hacks. Module installed to standard LuaRocks path.
+No `lua_package_path` hacks or `custom-plugins` volume mounts. Module installed to standard LuaRocks path. Uses unpinned `:jammy` tag to match current practice.
+
+### Test-runner Dockerfiles
+
+Both `t/integration/Dockerfile.test-runner` and `t/openresty-integration/Dockerfile.test-runner` need updated COPY paths since build contexts change to repo root. Example for APISIX test runner:
+
+```dockerfile
+FROM python:3.12-slim
+COPY t/integration/tests/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+WORKDIR /tests
+COPY t/integration/tests/ /tests/
+COPY t/integration/certs/ /certs/
+CMD ["pytest", "-v", "--tb=short", "/tests/"]
+```
+
+OpenResty test runner follows the same pattern with `t/openresty-integration/tests/` paths. Certs are shared — the OpenResty test runner copies from `t/integration/certs/` (single source of generated certs).
 
 ### Docker Compose
 
-Build contexts change to repo root (`.`) so the full source including rockspec is available. Volume mounts for `custom-plugins/` are removed from the OpenResty service.
+All build contexts change to repo root (`.`) so the full source including rockspec is available.
+
+**`docker-compose.integration.yml` key changes:**
+- APISIX service: `build: { context: ., dockerfile: t/integration/Dockerfile.apisix }` (replaces stock image + volume mounts)
+- APISIX service: volume mount for custom-plugins changes to `./t/integration/custom-plugins:/usr/local/apisix/custom-plugins:ro`
+- APISIX service: config volume mounts change to `./t/integration/conf/...`
+- Test runner: `build: { context: ., dockerfile: t/integration/Dockerfile.test-runner }`
+
+**`docker-compose.openresty-integration.yml` key changes:**
+- OpenResty service: `build: { context: ., dockerfile: t/openresty-integration/conf/Dockerfile }`
+- OpenResty service: `custom-plugins` volume mount removed (module installed via `luarocks make`)
+- Test runner: `build: { context: ., dockerfile: t/openresty-integration/Dockerfile.test-runner }`
+
+**`docker-compose.unit.yml` key changes:**
+- Unit test service: `build: { context: ., dockerfile: t/unit/Dockerfile }`
+
+### Certs sharing
+
+Both APISIX and OpenResty integration tests use the same generated certs. `generate-conf.sh` outputs to `t/integration/certs/`. The OpenResty conf Dockerfile and test-runner Dockerfile both reference `t/integration/certs/` — there is no separate `t/openresty-integration/certs/` directory.
 
 ### Makefile
 
-Targets stay the same: `unit`, `integration`, `openresty-integration`, `all`, `clean`. Paths updated for `t/` structure.
+Targets stay the same: `unit`, `integration`, `openresty-integration`, `all`, `clean`. Path changes:
+- `certs` target: `bash t/integration/generate-conf.sh`
+- `clean` target: remove `t/integration/certs/`, `t/integration/conf/apisix.yaml`
 
 ## Examples Directory
 
