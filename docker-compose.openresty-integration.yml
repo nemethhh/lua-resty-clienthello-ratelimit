@@ -1,0 +1,36 @@
+services:
+  openresty:
+    build:
+      context: integration
+      dockerfile: openresty-conf/Dockerfile
+    volumes:
+      - ./integration/custom-plugins:/usr/local/openresty/custom-plugins:ro
+    ports:
+      - "19443:443"
+      - "19092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9092/healthz || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    networks:
+      - testnet
+
+  test-runner:
+    build:
+      context: integration
+      dockerfile: openresty-tests/Dockerfile.test-runner
+    depends_on:
+      openresty:
+        condition: service_healthy
+    environment:
+      OPENRESTY_HTTPS_HOST: "openresty"
+      OPENRESTY_HTTPS_PORT: "443"
+      OPENRESTY_METRICS_URL: "http://openresty:9092/metrics"
+      TEST_DOMAIN: "test.example.com"
+    networks:
+      - testnet
+
+networks:
+  testnet:
+    driver: bridge
