@@ -6,6 +6,8 @@ import time
 class TestTlsPerIpRateLimit:
     def test_normal_handshake_succeeds(self, do_tls_handshake):
         """A single TLS handshake should succeed."""
+        # Wait for any block from earlier test files (metrics tests run first alphabetically)
+        time.sleep(12)
         assert do_tls_handshake() is True
 
     def test_rapid_handshakes_get_rejected(self, do_tls_handshake):
