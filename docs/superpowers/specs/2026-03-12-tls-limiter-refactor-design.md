@@ -61,6 +61,13 @@ Returns:
 - `false` — request allowed
 - `true, reason` — request should be rejected (`reason` is a string)
 
+Error/edge-case behavior:
+- If `extract_client_ip()` returns `nil` (no request context, unsupported address family): returns `false` (allow — fail open).
+- If `limit_req:incoming()` returns an error other than `"rejected"` (e.g., shared dict full): logs via `ngx.log(ngx.ERR, ...)` and returns `false` (allow — fail open).
+- The return type is always `boolean, string?` — never `nil`.
+
+**Phase context:** `check()` is only valid in `ssl_client_hello_by_lua*` context. Calling from other phases will return `false` (no request → `extract_client_ip()` returns nil → fail open).
+
 The core **never** calls `ngx.exit()`. The caller decides how to handle rejection.
 
 ### Internal Flow
@@ -94,9 +101,21 @@ Reused from current implementation:
 
 No APISIX dependencies. No ipmatcher. No text IP formatting.
 
+### Logging
+
+Core uses `ngx.log(ngx.ERR, ...)` directly for error conditions (e.g., unexpected `limit_req` errors). This is available in both APISIX and vanilla OpenResty contexts. No logging adapter is needed.
+
+### Performance: Pre-allocated Label Tables
+
+Label tables passed to `metrics.inc_counter()` are pre-allocated as module-level constants (e.g., `local LABELS_BLOCKLIST = {reason = "blocklist"}`). The metrics adapter **must not mutate** the labels table. This avoids per-request table allocation in the hot path.
+
 ## APISIX Adapter (`adapters/apisix.lua`)
 
 Standard APISIX plugin module (`_M` table with `name`, `version`, `priority`, `schema`).
+
+### APISIX Global Reference
+
+The monkey-patch targets `_G.apisix.ssl_client_hello_phase`. APISIX sets `_G.apisix` during bootstrap (in `apisix/init.lua` the module table is returned and assigned to the global by the entry point). The adapter checks `if apisix and apisix.ssl_client_hello_phase` before patching, and logs an error if not found (same guard as the current plugin). This is version-specific to APISIX's bootstrap behavior.
 
 ### Lifecycle
 
@@ -104,7 +123,7 @@ Standard APISIX plugin module (`_M` table with `name`, `version`, `priority`, `s
 1. Read config from `plugin.plugin_attr("tls-clienthello-limiter")`
 2. Build metrics adapter bridging to APISIX's prometheus exporter (or `nil` if unavailable)
 3. Create limiter: `core.new(merged_opts)`
-4. Monkey-patch `apisix.ssl_client_hello_phase`:
+4. Monkey-patch `_G.apisix.ssl_client_hello_phase`:
    ```lua
    local original = apisix.ssl_client_hello_phase
    apisix.ssl_client_hello_phase = function()
@@ -115,6 +134,10 @@ Standard APISIX plugin module (`_M` table with `name`, `version`, `priority`, `s
        return original()
    end
    ```
+5. Log effective configuration at `warn` level (rates, burst, block_ttl).
+
+**`init_worker()`:**
+- Not needed. The custom-metrics sweeper is removed, and APISIX's prometheus exporter manages its own lifecycle.
 
 **`destroy()`:**
 - Restore original `apisix.ssl_client_hello_phase`
@@ -204,6 +227,10 @@ All metrics are fixed-cardinality counters emitted via the injected adapter.
 - **IP whitelisting** — no longer in core; handled at APISIX routing layer
 - **`tls_clienthello_total` metric** — removed (was high-cardinality with `{domain=<sni>}`)
 - **Text IP conversion** — eliminated; all IP operations use binary keys
+
+## Migration Notes
+
+- **Rate limiter key format change:** Per-IP keys switch from text IP strings to binary (4/16 bytes). Since `resty.limit.req` stores state in shared dicts keyed by this value, a deploy will effectively reset all rate-limit counters. This is acceptable — counters recover within seconds of the configured rate window.
 
 ## Shared Dicts Required
 
