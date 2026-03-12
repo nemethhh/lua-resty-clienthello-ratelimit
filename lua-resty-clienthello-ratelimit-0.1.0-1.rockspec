@@ -2,7 +2,7 @@ package = "lua-resty-clienthello-ratelimit"
 version = "0.1.0-1"
 
 source = {
-    url = "git+https://github.com/<owner>/lua-resty-clienthello-ratelimit.git",
+    url = "git+https://github.com/nemethhh/lua-resty-clienthello-ratelimit.git",
     tag = "v0.1.0",
 }
 
@@ -13,7 +13,7 @@ description = {
         IP blocklist (T0), per-IP leaky bucket (T1), and per-SNI leaky bucket (T2).
         Ships with adapters for vanilla OpenResty and Apache APISIX.
     ]],
-    homepage = "https://github.com/<owner>/lua-resty-clienthello-ratelimit",
+    homepage = "https://github.com/nemethhh/lua-resty-clienthello-ratelimit",
     license = "MIT",
 }
 
