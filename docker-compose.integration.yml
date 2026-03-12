@@ -13,6 +13,7 @@ services:
     ports:
       - "9080:80"
       - "9443:443"
+      - "9091:9091"
       - "9092:9092"
     depends_on:
       - httpbin
@@ -35,7 +36,7 @@ services:
       APISIX_HTTP_URL: "http://apisix:80"
       APISIX_HTTPS_HOST: "apisix"
       APISIX_HTTPS_PORT: "443"
-      APISIX_METRICS_URL: "http://apisix:9092/metrics"
+      APISIX_METRICS_URL: "http://apisix:9091/apisix/prometheus/metrics"
       TEST_DOMAIN: "test.example.com"
     networks:
       - testnet

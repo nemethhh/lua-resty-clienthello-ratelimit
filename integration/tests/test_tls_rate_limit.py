@@ -91,7 +91,7 @@ class TestTlsMetricsCounters:
 
         do_tls_handshake()
         metrics = get_metrics()
-        assert "tls_clienthello_passed_total" in metrics or "tls_clienthello_total" in metrics
+        assert "tls_clienthello_passed_total" in metrics
 
     def test_blocked_counter_increments(self, do_tls_handshake, get_metrics):
         """After flooding, blocked counter should appear."""

@@ -10,7 +10,9 @@ import requests
 APISIX_HTTP_URL = os.environ.get("APISIX_HTTP_URL", "http://apisix:80")
 APISIX_HTTPS_HOST = os.environ.get("APISIX_HTTPS_HOST", "apisix")
 APISIX_HTTPS_PORT = int(os.environ.get("APISIX_HTTPS_PORT", "443"))
-APISIX_METRICS_URL = os.environ.get("APISIX_METRICS_URL", "http://apisix:9092/metrics")
+APISIX_METRICS_URL = os.environ.get(
+    "APISIX_METRICS_URL", "http://apisix:9091/apisix/prometheus/metrics"
+)
 TEST_DOMAIN = os.environ.get("TEST_DOMAIN", "test.example.com")
 CERT_PATH = "/certs/server.crt"
 
@@ -75,7 +77,7 @@ def do_tls_handshake(apisix_https_host, apisix_https_port):
 
 
 def fetch_metrics(url=None):
-    """Fetch and return the raw metrics text from the custom metrics endpoint."""
+    """Fetch and return the raw metrics text from the prometheus endpoint."""
     resp = requests.get(url or APISIX_METRICS_URL, timeout=5)
     resp.raise_for_status()
     return resp.text
