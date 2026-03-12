@@ -5,6 +5,7 @@ CERTS_DIR="$(dirname "$0")/certs"
 CONF_DIR="$(dirname "$0")/conf"
 
 # Generate self-signed cert if not present
+mkdir -p "$CERTS_DIR"
 if [ ! -f "$CERTS_DIR/server.crt" ]; then
     openssl req -x509 -newkey rsa:2048 \
         -keyout "$CERTS_DIR/server.key" \
