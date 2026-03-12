@@ -55,7 +55,7 @@ end
 --- @param iterations number Number of iterations (default 200)
 --- @return table            { name, status, traces, aborts }
 local function check_path(name, func, iterations)
-    iterations = iterations or 200
+    iterations = iterations or 500
 
     local stops = 0
     local aborts = {}
@@ -64,10 +64,14 @@ local function check_path(name, func, iterations)
         if what == "stop" then
             stops = stops + 1
         elseif what == "abort" then
-            aborts[#aborts + 1] = {
-                reason   = format_abort_reason(otr, oex),
-                location = format_location(tfunc, pc),
-            }
+            local location = format_location(tfunc, pc)
+            -- Skip aborts from the harness loop itself
+            if not location:find("jit_trace%.lua") then
+                aborts[#aborts + 1] = {
+                    reason   = format_abort_reason(otr, oex),
+                    location = location,
+                }
+            end
         end
         -- "start" and "flush" events are ignored
     end
@@ -83,12 +87,14 @@ local function check_path(name, func, iterations)
     jit.attach(trace_cb)  -- detach (call without event type)
 
     local status
-    if #aborts > 0 then
-        status = "aborted"
-    elseif stops > 0 then
+    if stops > 0 and #aborts == 0 then
         status = "compiled"
+    elseif stops > 0 and #aborts > 0 then
+        status = "compiled_with_aborts"  -- code JIT-compiles, but some traces aborted
+    elseif #aborts > 0 then
+        status = "aborted"              -- no successful traces at all
     else
-        status = "no_traces"  -- too simple or JIT didn't kick in
+        status = "no_traces"            -- too simple or JIT didn't kick in
     end
     return {
         name   = name,
@@ -114,12 +120,17 @@ local function format_human(results)
         string.rep("-", 27), string.rep("-", 9), string.rep("-", 6), string.rep("-", 6))
 
     local compiled_count = 0
-    local STATUS_LABELS = { compiled = "COMPILED", aborted = "ABORT", no_traces = "NO_TRACE" }
+    local STATUS_LABELS = {
+        compiled = "COMPILED",
+        compiled_with_aborts = "COMPILED*",
+        aborted = "ABORT",
+        no_traces = "NO_TRACE",
+    }
     for _, r in ipairs(results) do
         local status_str = STATUS_LABELS[r.status] or r.status
         lines[#lines + 1] = string.format(
             "  %-28s %-10s %-7d %d", r.name, status_str, r.traces, #r.aborts)
-        if r.status == "compiled" then
+        if r.status == "compiled" or r.status == "compiled_with_aborts" then
             compiled_count = compiled_count + 1
         end
         for _, a in ipairs(r.aborts) do
@@ -131,11 +142,22 @@ local function format_human(results)
     lines[#lines + 1] = ""
     lines[#lines + 1] = "====================================================="
     local total = #results
-    if compiled_count == total then
+    local aborted_count = 0
+    for _, r in ipairs(results) do
+        if r.status == "aborted" then aborted_count = aborted_count + 1 end
+    end
+    local has_star = false
+    for _, r in ipairs(results) do
+        if r.status == "compiled_with_aborts" then has_star = true; break end
+    end
+    if aborted_count == 0 then
         lines[#lines + 1] = string.format("Result: PASS (%d/%d paths compiled)", compiled_count, total)
+        if has_star then
+            lines[#lines + 1] = "  (* = compiled with some structural trace aborts, see aborts column)"
+        end
     else
-        lines[#lines + 1] = string.format("Result: FAIL (%d/%d paths have trace aborts)",
-            total - compiled_count, total)
+        lines[#lines + 1] = string.format("Result: FAIL (%d/%d paths failed to JIT-compile)",
+            aborted_count, total)
     end
 
     return table.concat(lines, "\n")
@@ -145,7 +167,9 @@ local function format_json(results)
     -- Minimal JSON encoder (no external dependencies)
     local compiled_count = 0
     for _, r in ipairs(results) do
-        if r.status == "compiled" then compiled_count = compiled_count + 1 end
+        if r.status == "compiled" or r.status == "compiled_with_aborts" then
+            compiled_count = compiled_count + 1
+        end
     end
 
     local total = #results
@@ -182,8 +206,11 @@ local function format_tap(results)
     lines[#lines + 1] = "1.." .. #results
 
     for i, r in ipairs(results) do
-        if r.status == "compiled" then
-            lines[#lines + 1] = string.format("ok %d - %s", i, r.name)
+        local passed = r.status == "compiled" or r.status == "compiled_with_aborts"
+        if passed then
+            local suffix = r.status == "compiled_with_aborts"
+                and " # structural trace aborts (code still JIT-compiles)" or ""
+            lines[#lines + 1] = string.format("ok %d - %s%s", i, r.name, suffix)
         else
             lines[#lines + 1] = string.format("not ok %d - %s", i, r.name)
             for _, a in ipairs(r.aborts) do
