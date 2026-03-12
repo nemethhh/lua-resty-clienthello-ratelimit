@@ -30,7 +30,7 @@ For each code path:
 1. `jit.flush()` — clear existing traces so events are isolated to this path
 2. `jit.attach(callback, "trace")` — register a callback that fires on trace events
 3. Run the path function in a loop (200 iterations, well above LuaJIT's default hot-loop threshold of 56)
-4. `jit.attach(nil, "trace")` — detach the callback
+4. `jit.attach(callback)` — detach (call with handler only, no event type)
 5. Analyze captured events to determine compilation status
 
 ### `jit.attach` callback signature
