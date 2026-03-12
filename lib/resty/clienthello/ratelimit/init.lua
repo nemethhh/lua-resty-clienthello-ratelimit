@@ -1,5 +1,5 @@
 -- =============================================================================
--- tls-clienthello-limiter.core — Platform-agnostic TLS ClientHello rate limiter
+-- resty.clienthello.ratelimit — Platform-agnostic TLS ClientHello rate limiter
 --
 -- Multi-layer rate limiting for TLS ClientHello:
 --   T0: IP blocklist (shared dict, binary keys)

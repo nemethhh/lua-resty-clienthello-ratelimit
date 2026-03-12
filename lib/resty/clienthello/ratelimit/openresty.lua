@@ -5,8 +5,8 @@
 -- Creates nginx-lua-prometheus counters with TTL expiration.
 --
 -- Usage:
---   init_worker_by_lua_block { require("...adapters.openresty").init() }
---   ssl_client_hello_by_lua_block { require("...adapters.openresty").check() }
+--   init_worker_by_lua_block { require("resty.clienthello.ratelimit.openresty").init() }
+--   ssl_client_hello_by_lua_block { require("resty.clienthello.ratelimit.openresty").check() }
 -- =============================================================================
 
 local core_mod = require("resty.clienthello.ratelimit")
