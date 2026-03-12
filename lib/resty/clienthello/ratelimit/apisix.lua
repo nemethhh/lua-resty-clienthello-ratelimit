@@ -6,6 +6,7 @@
 -- =============================================================================
 
 local core_mod = require("resty.clienthello.ratelimit")
+local config_mod = require("resty.clienthello.ratelimit.config")
 local apisix_core = require("apisix.core")
 local plugin = require("apisix.plugin")
 
@@ -16,7 +17,7 @@ local plugin_name = "tls-clienthello-limiter"
 
 local _M = {
     name     = plugin_name,
-    version  = 0.2,
+    version  = 0.3,
     priority = 0,
     schema   = {
         type = "object",
@@ -30,7 +31,10 @@ local original_ssl_client_hello_phase
 
 
 function _M.check_schema(conf)
-    return apisix_core.schema.check(_M.schema, conf)
+    -- Validate APISIX route-level schema (empty — no per-route config)
+    local ok, err = apisix_core.schema.check(_M.schema, conf)
+    if not ok then return false, err end
+    return true
 end
 
 
@@ -41,18 +45,14 @@ local function build_metrics_adapter()
         return nil
     end
 
-    -- The APISIX prometheus exporter exposes a prometheus object.
-    -- We create counters lazily on first use.
     local counters = {}
 
     return {
         inc_counter = function(name, labels)
-            -- Use APISIX's prometheus instance if available
             local p = prometheus_mod.get_prometheus()
             if not p then return end
 
             if not counters[name] then
-                -- Collect label names from the labels table
                 local label_names = {}
                 if labels then
                     for k in pairs(labels) do
@@ -85,18 +85,30 @@ end
 function _M.init()
     -- Read plugin_attr configuration
     local attr = plugin.plugin_attr(plugin_name)
-    local opts = {}
+    local core_opts = {}
     if attr then
-        for k, v in pairs(attr) do
-            opts[k] = v
-        end
+        core_opts.per_ip = attr.per_ip
+        core_opts.per_domain = attr.per_domain
     end
 
     -- Build metrics adapter
-    opts.metrics = build_metrics_adapter()
+    local metrics_adapter = build_metrics_adapter()
 
     -- Create core limiter
-    lim = core_mod.new(opts)
+    local limiter, warnings_or_err = core_mod.new(core_opts, metrics_adapter)
+    if not limiter then
+        apisix_core.log.error("tls-clienthello-limiter: config error: ", tostring(warnings_or_err))
+        return
+    end
+
+    -- Log any warnings
+    if warnings_or_err then
+        for _, w in ipairs(warnings_or_err) do
+            apisix_core.log.warn("tls-clienthello-limiter: ", w)
+        end
+    end
+
+    lim = limiter
 
     -- Monkey-patch apisix.ssl_client_hello_phase
     if apisix and apisix.ssl_client_hello_phase then
@@ -108,10 +120,7 @@ function _M.init()
             end
             return original_ssl_client_hello_phase()
         end
-        apisix_core.log.warn("tls-clienthello-limiter: wrapped ssl_client_hello_phase"
-            .. " (per_ip_rate=", opts.per_ip_rate or 2,
-            ", per_domain_rate=", opts.per_domain_rate or 5,
-            ", block_ttl=", opts.block_ttl or 10, ")")
+        apisix_core.log.warn("tls-clienthello-limiter: wrapped ssl_client_hello_phase")
     else
         apisix_core.log.error("tls-clienthello-limiter: apisix.ssl_client_hello_phase not found, "
             .. "plugin will not provide TLS rate limiting")
