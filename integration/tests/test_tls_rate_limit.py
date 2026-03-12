@@ -38,6 +38,8 @@ class TestTlsPerIpRateLimit:
         for _ in range(30):
             do_tls_handshake(timeout=1)
 
+        # Allow prometheus metrics cache to refresh (refresh_interval=1)
+        time.sleep(2)
         metrics = get_metrics()
         assert "tls_ip_autoblock_total" in metrics or "tls_clienthello_rejected_total" in metrics
 
