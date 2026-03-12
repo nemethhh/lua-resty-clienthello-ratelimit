@@ -5,14 +5,24 @@
 -- Creates nginx-lua-prometheus counters with TTL expiration.
 --
 -- Usage:
---   init_worker_by_lua_block { require("resty.clienthello.ratelimit.openresty").init() }
---   ssl_client_hello_by_lua_block { require("resty.clienthello.ratelimit.openresty").check() }
+--   init_worker_by_lua_block {
+--       require("resty.clienthello.ratelimit.openresty").init({
+--           per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+--           per_domain = { rate = 5, burst = 10 },
+--           prometheus_dict = "prometheus-metrics",
+--       })
+--   }
+--   ssl_client_hello_by_lua_block {
+--       require("resty.clienthello.ratelimit.openresty").check()
+--   }
 -- =============================================================================
 
 local core_mod = require("resty.clienthello.ratelimit")
 
 local ngx      = ngx
 local ngx_exit = ngx.exit
+local ngx_log  = ngx.log
+local ngx_WARN = ngx.WARN
 
 local _M = {}
 
@@ -56,29 +66,50 @@ end
 
 
 --- Initialize the limiter. Call once in init_worker_by_lua_block.
---- @param opts table|nil Config overrides + optional prometheus/exptime fields
+--- @param opts table Config: per_ip, per_domain tables + optional prometheus_dict, prometheus, metrics_exptime
 function _M.init(opts)
     opts = opts or {}
 
+    -- Extract adapter-specific keys before passing to core
     local p = opts.prometheus
+    local prometheus_dict = opts.prometheus_dict
+    local metrics_exptime = opts.metrics_exptime
     local metrics_adapter = nil
 
     if p then
-        metrics_adapter = build_metrics_adapter(p, opts.metrics_exptime or 300)
+        metrics_adapter = build_metrics_adapter(p, metrics_exptime or 300)
     else
         local ok, prometheus_lib = pcall(require, "prometheus")
         if ok then
-            local dict_name = opts.prometheus_dict or "prometheus-metrics"
+            local dict_name = prometheus_dict or "prometheus-metrics"
             p = prometheus_lib.init(dict_name)
             if p then
-                metrics_adapter = build_metrics_adapter(p, opts.metrics_exptime or 300)
+                metrics_adapter = build_metrics_adapter(p, metrics_exptime or 300)
             end
         end
     end
 
     _M.prometheus = p  -- expose for metrics endpoint
-    opts.metrics = metrics_adapter
-    lim = core_mod.new(opts)
+
+    -- Pass only rate-limit config to core (strip adapter keys)
+    local core_opts = {
+        per_ip = opts.per_ip,
+        per_domain = opts.per_domain,
+    }
+
+    local limiter, warnings_or_err = core_mod.new(core_opts, metrics_adapter)
+    if not limiter then
+        error("tls-clienthello-limiter: " .. tostring(warnings_or_err))
+    end
+
+    -- Log any warnings
+    if warnings_or_err then
+        for _, w in ipairs(warnings_or_err) do
+            ngx_log(ngx_WARN, "tls-clienthello-limiter: ", w)
+        end
+    end
+
+    lim = limiter
 end
 
 
