@@ -58,11 +58,13 @@ nginx_config:
 
 plugin_attr:
   tls-clienthello-limiter:
-    per_ip_rate: 2
-    per_ip_burst: 4
-    per_domain_rate: 5
-    per_domain_burst: 10
-    block_ttl: 10
+    per_ip:
+      rate: 2
+      burst: 4
+      block_ttl: 10
+    per_domain:
+      rate: 5
+      burst: 10
   prometheus:
     enable_export_server: true
     export_addr:

@@ -13,7 +13,7 @@ class TestTlsPerIpRateLimit:
     def test_rapid_handshakes_get_rejected(self, do_tls_handshake):
         """Flooding TLS handshakes beyond per_ip_rate+burst should fail.
 
-        Config: per_ip_rate=2, per_ip_burst=4.
+        Config: per_ip: rate=2, burst=4.
         The leaky bucket allows rate+burst=6 before rejecting.
         We send 20 rapid handshakes and expect some to fail.
         """
@@ -72,7 +72,7 @@ class TestTlsPerDomainRateLimit:
     def test_per_domain_limit_triggers(self, do_tls_handshake, get_metrics):
         """Flooding a single domain should trigger per-domain rejection.
 
-        Config: per_domain_rate=5, per_domain_burst=10.
+        Config: per_domain: rate=5, burst=10.
         """
         # Wait for any previous per-IP block to clear
         time.sleep(12)
