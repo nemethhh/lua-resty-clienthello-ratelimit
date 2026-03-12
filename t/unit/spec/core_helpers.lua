@@ -10,9 +10,9 @@ local mock_request = true
 function _M.setup(opts)
     opts = opts or {}
     helpers.setup({
-        opts.dict_per_ip or "tls-hello-per-ip",
-        opts.dict_per_domain or "tls-hello-per-domain",
-        opts.dict_blocklist or "tls-ip-blocklist",
+        "tls-hello-per-ip",
+        "tls-hello-per-domain",
+        "tls-ip-blocklist",
     })
 
     mock_bin_ip = opts.bin_ip or string.char(10, 0, 0, 1)
@@ -32,6 +32,7 @@ function _M.setup(opts)
     }
 
     package.loaded["resty.clienthello.ratelimit"] = nil
+    package.loaded["resty.clienthello.ratelimit.config"] = nil
 end
 
 function _M.make_limit_req_mock()

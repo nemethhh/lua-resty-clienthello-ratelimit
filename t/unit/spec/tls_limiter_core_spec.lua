@@ -1,7 +1,7 @@
 local ch = require("spec.core_helpers")
 
 describe("tls-clienthello-limiter.core", function()
-    local core, spy
+    local spy
 
     before_each(function()
         spy = ch.make_metrics_spy()
@@ -9,50 +9,70 @@ describe("tls-clienthello-limiter.core", function()
     end)
 
     describe("new()", function()
-        it("creates a limiter with defaults", function()
+        it("creates a limiter with both tiers", function()
             local core = ch.require_core()
-            local lim = core.new()
+            local lim, err = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+                per_domain = { rate = 5, burst = 10 },
+            }, spy)
+            assert.is_nil(err)
             assert.is_not_nil(lim)
             assert.is_function(lim.check)
         end)
 
-        it("creates a limiter with custom config", function()
+        it("creates a limiter with per_ip only", function()
             local core = ch.require_core()
-            local lim = core.new({
-                per_ip_rate = 10,
-                per_ip_burst = 20,
-                metrics = spy,
-            })
+            local lim, err = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+            }, spy)
+            assert.is_nil(err)
             assert.is_not_nil(lim)
         end)
 
-        it("creates a limiter with no shared dicts gracefully", function()
-            ch.setup({dict_per_ip = "nonexistent-a", dict_per_domain = "nonexistent-b", dict_blocklist = "nonexistent-c"})
+        it("creates a limiter with per_domain only", function()
             local core = ch.require_core()
-            local lim = core.new({
-                dict_per_ip = "nonexistent-a",
-                dict_per_domain = "nonexistent-b",
-                dict_blocklist = "nonexistent-c",
-            })
+            local lim, err = core.new({
+                per_domain = { rate = 5, burst = 10 },
+            }, spy)
+            assert.is_nil(err)
             assert.is_not_nil(lim)
+        end)
+
+        it("returns warnings when no tiers configured", function()
+            local core = ch.require_core()
+            local lim, warnings = core.new({})
+            assert.is_not_nil(lim)
+            assert.are.equal(1, #warnings)
+            assert.truthy(warnings[1]:find("no rate limit"))
+        end)
+
+        it("returns nil and error for invalid config", function()
+            local core = ch.require_core()
+            local lim, err = core.new({ per_ip = { rate = -1, burst = 4, block_ttl = 10 } })
+            assert.is_nil(lim)
+            assert.is_string(err)
         end)
     end)
 
-    describe("check()", function()
+    describe("check() with both tiers", function()
         it("returns false when no request context", function()
             ch.set_mock_request(false)
             local core = ch.require_core()
-            local lim = core.new({metrics = spy})
+            local lim = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+                per_domain = { rate = 5, burst = 10 },
+            }, spy)
             local rejected, reason = lim:check()
             assert.is_false(rejected)
             assert.is_nil(reason)
         end)
 
         it("returns true,'blocklist' for blocked IP", function()
-            ch.setup({sni = "test.example.com"})
             local core = ch.require_core()
-            local lim = core.new({metrics = spy})
-            -- Pre-populate blocklist
+            local lim = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+                per_domain = { rate = 5, burst = 10 },
+            }, spy)
             local dict = ngx.shared["tls-ip-blocklist"]
             local bin_ip = string.char(10, 0, 0, 1)
             dict:set(bin_ip, true, 60)
@@ -63,23 +83,22 @@ describe("tls-clienthello-limiter.core", function()
         end)
 
         it("returns false for a normal request", function()
-            ch.setup({sni = "test.example.com"})
             local core = ch.require_core()
-            local lim = core.new({metrics = spy})
+            local lim = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+                per_domain = { rate = 5, burst = 10 },
+            }, spy)
             local rejected = lim:check()
             assert.is_false(rejected)
             assert.is_not_nil(spy.find("tls_clienthello_passed_total"))
         end)
 
         it("returns true,'per_ip' after exceeding per-IP rate+burst", function()
-            ch.setup({sni = "test.example.com"})
             local core = ch.require_core()
             local lim = core.new({
-                per_ip_rate = 2,
-                per_ip_burst = 4,
-                metrics = spy,
-            })
-            -- rate+burst = 6, so 7th call should be rejected
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+                per_domain = { rate = 100, burst = 100 },
+            }, spy)
             for i = 1, 6 do
                 local rejected = lim:check()
                 assert.is_false(rejected, "call " .. i .. " should pass")
@@ -87,21 +106,15 @@ describe("tls-clienthello-limiter.core", function()
             local rejected, reason = lim:check()
             assert.is_true(rejected)
             assert.are.equal("per_ip", reason)
-            -- Should have auto-blocked
             assert.is_not_nil(spy.find("tls_ip_autoblock_total"))
         end)
 
         it("returns true,'per_domain' after exceeding per-domain rate+burst", function()
-            ch.setup({sni = "test.example.com"})
             local core = ch.require_core()
-            -- High per-IP limit so it doesn't trigger first
             local lim = core.new({
-                per_ip_rate = 100,
-                per_ip_burst = 100,
-                per_domain_rate = 2,
-                per_domain_burst = 2,
-                metrics = spy,
-            })
+                per_ip = { rate = 100, burst = 100, block_ttl = 10 },
+                per_domain = { rate = 2, burst = 2 },
+            }, spy)
             for i = 1, 4 do
                 lim:check()
             end
@@ -114,37 +127,101 @@ describe("tls-clienthello-limiter.core", function()
             ch.setup()
             ch.set_mock_sni(nil)
             local core = ch.require_core()
-            local lim = core.new({metrics = spy})
+            local lim = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+                per_domain = { rate = 5, burst = 10 },
+            }, spy)
             lim:check()
             assert.is_not_nil(spy.find("tls_clienthello_no_sni_total"))
         end)
 
         it("works without metrics adapter (nil)", function()
-            ch.setup({sni = "test.example.com"})
             local core = ch.require_core()
-            local lim = core.new()  -- no metrics
+            local lim = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+                per_domain = { rate = 5, burst = 10 },
+            })
             local rejected = lim:check()
             assert.is_false(rejected)
         end)
 
         it("after auto-block, subsequent calls hit blocklist", function()
-            ch.setup({sni = "test.example.com"})
             local core = ch.require_core()
             local lim = core.new({
-                per_ip_rate = 1,
-                per_ip_burst = 1,
-                metrics = spy,
-            })
-            -- Exhaust: 2 pass, 3rd rejected + auto-blocked
+                per_ip = { rate = 1, burst = 1, block_ttl = 10 },
+                per_domain = { rate = 100, burst = 100 },
+            }, spy)
             lim:check()
             lim:check()
             lim:check()
-            -- Now should hit blocklist path
             spy = ch.make_metrics_spy()
             lim.metrics = spy
             local rejected, reason = lim:check()
             assert.is_true(rejected)
             assert.are.equal("blocklist", reason)
+        end)
+    end)
+
+    describe("check() with per_ip only", function()
+        it("skips per_domain tier entirely", function()
+            local core = ch.require_core()
+            local lim = core.new({
+                per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+            }, spy)
+            local rejected = lim:check()
+            assert.is_false(rejected)
+            -- Should see per_ip passed but no per_domain passed
+            assert.is_not_nil(spy.find("tls_clienthello_passed_total"))
+            -- The per_domain tier should not emit anything
+            local calls = spy.get_calls()
+            for _, c in ipairs(calls) do
+                if c.labels and c.labels.layer then
+                    assert.are_not.equal("per_domain", c.labels.layer)
+                end
+            end
+        end)
+
+        it("still applies blocklist when per_ip rejects", function()
+            local core = ch.require_core()
+            local lim = core.new({
+                per_ip = { rate = 1, burst = 1, block_ttl = 10 },
+            }, spy)
+            lim:check()
+            lim:check()
+            lim:check()  -- should be rejected + auto-blocked
+            assert.is_not_nil(spy.find("tls_ip_autoblock_total"))
+        end)
+    end)
+
+    describe("check() with per_domain only", function()
+        it("skips per_ip and blocklist tiers entirely", function()
+            local core = ch.require_core()
+            local lim = core.new({
+                per_domain = { rate = 5, burst = 10 },
+            }, spy)
+            local rejected = lim:check()
+            assert.is_false(rejected)
+            -- Should not emit per_ip metrics
+            local calls = spy.get_calls()
+            for _, c in ipairs(calls) do
+                if c.labels and c.labels.layer then
+                    assert.are_not.equal("per_ip", c.labels.layer)
+                end
+                assert.are_not.equal("tls_clienthello_blocked_total", c.name)
+                assert.are_not.equal("tls_ip_autoblock_total", c.name)
+            end
+        end)
+
+        it("does not block IPs (no blocklist)", function()
+            local core = ch.require_core()
+            -- Even with high traffic, no auto-block since per_ip is disabled
+            local lim = core.new({
+                per_domain = { rate = 1, burst = 1 },
+            }, spy)
+            lim:check()
+            lim:check()
+            lim:check()  -- rejected by per_domain
+            assert.is_nil(spy.find("tls_ip_autoblock_total"))
         end)
     end)
 end)
