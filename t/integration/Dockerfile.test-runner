@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+
+COPY t/integration/tests/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+WORKDIR /tests
+COPY t/integration/tests/ /tests/
+COPY t/integration/certs/ /certs/
+
+CMD ["pytest", "-v", "--tb=short", "/tests/"]

@@ -5,11 +5,13 @@ services:
       - testnet
 
   apisix:
-    image: apache/apisix:3.15.0-ubuntu
+    build:
+      context: .
+      dockerfile: t/integration/Dockerfile.apisix
     volumes:
-      - ./integration/conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro
-      - ./integration/conf/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
-      - ./integration/custom-plugins:/usr/local/apisix/custom-plugins:ro
+      - ./t/integration/conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./t/integration/conf/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+      - ./t/integration/custom-plugins:/usr/local/apisix/custom-plugins:ro
     ports:
       - "9080:80"
       - "9443:443"
@@ -27,8 +29,8 @@ services:
 
   test-runner:
     build:
-      context: integration
-      dockerfile: Dockerfile.test-runner
+      context: .
+      dockerfile: t/integration/Dockerfile.test-runner
     depends_on:
       apisix:
         condition: service_healthy
