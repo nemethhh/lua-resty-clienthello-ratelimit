@@ -1,0 +1,5 @@
+services:
+  bench-jit:
+    build:
+      context: .
+      dockerfile: bench/Dockerfile
