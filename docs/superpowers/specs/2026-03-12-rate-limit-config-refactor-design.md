@@ -83,12 +83,28 @@ The caller (`_M.new` or adapters) is responsible for logging any warnings via `n
 
 ## Core Limiter Changes (`init.lua`)
 
-### `_M.new(opts)`
+### `_M.new(opts)` signature change
+
+The signature changes to accept rate-limit config and metrics adapter separately:
+
+```lua
+function _M.new(opts, metrics)
+```
+
+- `opts` — the rate-limit config table (passed to `config.validate`). Contains only `per_ip` and `per_domain`.
+- `metrics` — optional metrics adapter object (has `inc_counter` method). Passed separately, not inside `opts`.
+
+This separation means `config.validate` only ever sees rate-limit keys — no need to strip `metrics` or other adapter concerns.
+
+**Return value change:** `_M.new` currently always returns a limiter object. It now returns `limiter, warnings` on success or `nil, err` on failure. The `warnings` list comes from `config.validate`. Callers must check for `nil` before using the limiter.
+
+### `_M.new(opts, metrics)` behavior
 
 - Calls `config.validate(opts)` first. Returns `nil, err` on failure.
 - No hardcoded defaults — uses validated config directly.
 - If `per_ip` is nil: skips `limit_req` object creation for per-IP, skips acquiring `tls-hello-per-ip` and `tls-ip-blocklist` shared dicts.
 - If `per_domain` is nil: skips `limit_req` object creation for per-domain, skips acquiring `tls-hello-per-domain` shared dict.
+- Shared dict names remain hardcoded constants (`tls-hello-per-ip`, `tls-hello-per-domain`, `tls-ip-blocklist`) — custom dict names are not supported in this version.
 - Stores `self.per_ip_enabled` and `self.per_domain_enabled` booleans.
 
 ### `_M:check()`
@@ -104,9 +120,9 @@ The caller (`_M.new` or adapters) is responsible for logging any warnings via `n
 ### OpenResty adapter (`openresty.lua`)
 
 - Removes all default constants.
-- Extracts adapter-specific keys (`prometheus_dict`) from opts before passing to `_M.new()`. The adapter owns these keys — `config.validate` never sees them.
+- Extracts adapter-specific keys (`prometheus_dict`) from opts, builds the metrics adapter, then passes the remaining rate-limit config to `_M.new(rate_opts, metrics)`.
 - If `_M.new()` returns `nil, err`, the adapter calls `error()` to fail loudly at init time.
-- Logs any warnings from validated config via `ngx.log(ngx.WARN, ...)`.
+- Logs any warnings from the second return value via `ngx.log(ngx.WARN, ...)`.
 
 Example:
 
@@ -123,7 +139,7 @@ require("resty.clienthello.ratelimit.openresty").init({
 - Removes all default constants.
 - Reads `plugin_attr` and translates into nested shape before passing to `_M.new()`.
 - `check_schema()` delegates to `config.validate` for the tier config. APISIX-specific keys are validated separately by the adapter's own schema.
-- If `_M.new()` returns `nil, err`, the adapter logs the error and does not install the `ssl_client_hello` hook — the plugin is effectively disabled with a clear error in logs.
+- If `_M.new()` returns `nil, err`, the adapter logs the error and does not install the `ssl_client_hello` monkey-patch — APISIX runs its original phase handler unmodified. The plugin is effectively disabled with a clear error in logs.
 
 Example APISIX YAML:
 
@@ -182,6 +198,7 @@ This is a breaking change. The README must include a migration section:
 - Old flat keys (`per_ip_rate`, `per_ip_burst`, `per_domain_rate`, `per_domain_burst`, `block_ttl`) are no longer accepted.
 - The module detects old-style config and returns a helpful error with the new format.
 - Users must update their `init()` call (OpenResty) or `plugin_attr` YAML (APISIX) to the nested format.
+- Custom shared dict names (`dict_per_ip`, `dict_per_domain`, `dict_blocklist`) are removed. Dict names are now hardcoded constants. Users who customized dict names must rename their shared dicts to the standard names.
 
 ## File Changes
 
