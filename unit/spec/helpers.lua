@@ -133,6 +133,7 @@ function _M.setup(dict_names)
 
     -- Clear cached module so it re-reads the ngx global
     package.loaded["custom-metrics"] = nil
+    package.loaded["tls-clienthello-limiter.core"] = nil
 end
 
 --- Advance mock time by `seconds`.
