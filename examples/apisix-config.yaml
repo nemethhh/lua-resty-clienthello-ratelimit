@@ -1,0 +1,24 @@
+# Example APISIX config for tls-clienthello-limiter
+# Add these sections to your existing apisix config.yaml
+
+apisix:
+  extra_lua_path: "/path/to/custom-plugins/?.lua"
+
+plugins:
+  - tls-clienthello-limiter
+  # ... your other plugins ...
+
+nginx_config:
+  http:
+    custom_lua_shared_dict:
+      tls-hello-per-ip: 1m
+      tls-hello-per-domain: 1m
+      tls-ip-blocklist: 1m
+
+plugin_attr:
+  tls-clienthello-limiter:
+    per_ip_rate: 2
+    per_ip_burst: 4
+    per_domain_rate: 5
+    per_domain_burst: 10
+    block_ttl: 10
