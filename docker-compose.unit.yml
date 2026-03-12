@@ -1,5 +1,5 @@
 services:
   unit-tests:
     build:
-      context: unit
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: t/unit/Dockerfile
