@@ -60,22 +60,23 @@ end
 function _M.init(opts)
     opts = opts or {}
 
-    -- Set up prometheus metrics adapter if prometheus instance provided
+    local p = opts.prometheus
     local metrics_adapter = nil
-    if opts.prometheus then
-        metrics_adapter = build_metrics_adapter(opts.prometheus, opts.metrics_exptime or 300)
+
+    if p then
+        metrics_adapter = build_metrics_adapter(p, opts.metrics_exptime or 300)
     else
-        -- Try to create prometheus instance from shared dict
         local ok, prometheus_lib = pcall(require, "prometheus")
         if ok then
             local dict_name = opts.prometheus_dict or "prometheus-metrics"
-            local p = prometheus_lib.init(dict_name)
+            p = prometheus_lib.init(dict_name)
             if p then
                 metrics_adapter = build_metrics_adapter(p, opts.metrics_exptime or 300)
             end
         end
     end
 
+    _M.prometheus = p  -- expose for metrics endpoint
     opts.metrics = metrics_adapter
     lim = core_mod.new(opts)
 end
