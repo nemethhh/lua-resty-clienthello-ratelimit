@@ -1,10 +1,8 @@
 services:
   openresty:
     build:
-      context: integration
-      dockerfile: openresty-conf/Dockerfile
-    volumes:
-      - ./integration/custom-plugins:/usr/local/openresty/custom-plugins:ro
+      context: .
+      dockerfile: t/openresty-integration/conf/Dockerfile
     ports:
       - "19443:443"
       - "19092:9092"
@@ -18,8 +16,8 @@ services:
 
   test-runner:
     build:
-      context: integration
-      dockerfile: openresty-tests/Dockerfile.test-runner
+      context: .
+      dockerfile: t/openresty-integration/Dockerfile.test-runner
     depends_on:
       openresty:
         condition: service_healthy
