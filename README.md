@@ -20,6 +20,7 @@ The repository includes:
 ```text
 lib/resty/clienthello/ratelimit/
   init.lua        core limiter
+  config.lua      config validation
   openresty.lua   OpenResty adapter
   apisix.lua      APISIX adapter
 
@@ -44,18 +45,20 @@ For each TLS ClientHello:
 4. If an SNI is present, it applies a per-domain rate limit.
 5. If the per-IP limiter rejects a client, the IP is automatically added to the blocklist for `block_ttl` seconds.
 
-Default settings:
+Configuration is required — there are no defaults. You must specify at least one rate-limiting tier:
 
-| Option | Default |
+| Tier | Key | Required fields |
+| --- | --- | --- |
+| Per-IP (T0+T1) | `per_ip` | `rate` (number > 0), `burst` (number >= 0), `block_ttl` (number > 0) |
+| Per-domain (T2) | `per_domain` | `rate` (number > 0), `burst` (number >= 0) |
+
+Shared dictionaries (names are fixed):
+
+| Dict | Purpose |
 | --- | --- |
-| `per_ip_rate` | `2` |
-| `per_ip_burst` | `4` |
-| `per_domain_rate` | `5` |
-| `per_domain_burst` | `10` |
-| `block_ttl` | `10` |
-| `dict_per_ip` | `tls-hello-per-ip` |
-| `dict_per_domain` | `tls-hello-per-domain` |
-| `dict_blocklist` | `tls-ip-blocklist` |
+| `tls-hello-per-ip` | Per-IP rate limiter state |
+| `tls-hello-per-domain` | Per-SNI rate limiter state |
+| `tls-ip-blocklist` | Auto-blocked IPs with TTL |
 
 ## Requirements
 
@@ -89,24 +92,21 @@ luarocks make
 This publishes the following Lua modules:
 
 - `resty.clienthello.ratelimit`
+- `resty.clienthello.ratelimit.config`
 - `resty.clienthello.ratelimit.openresty`
 - `resty.clienthello.ratelimit.apisix`
 
 ## Core module
 
-The core module is platform-agnostic and exposes `new(opts)` plus `check()`.
+The core module is platform-agnostic and exposes `new(opts, metrics)` plus `check()`.
 
 ```lua
 local limiter = require("resty.clienthello.ratelimit")
 
-local lim = limiter.new({
-    per_ip_rate = 2,
-    per_ip_burst = 4,
-    per_domain_rate = 5,
-    per_domain_burst = 10,
-    block_ttl = 10,
-    metrics = my_metrics_adapter,
-})
+local lim, warnings = limiter.new({
+    per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+    per_domain = { rate = 5, burst = 10 },
+}, my_metrics_adapter)
 
 local rejected, reason = lim:check()
 if rejected then
@@ -143,11 +143,8 @@ http {
 
     init_worker_by_lua_block {
         require("resty.clienthello.ratelimit.openresty").init({
-            per_ip_rate = 2,
-            per_ip_burst = 4,
-            per_domain_rate = 5,
-            per_domain_burst = 10,
-            block_ttl = 10,
+            per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+            per_domain = { rate = 5, burst = 10 },
             prometheus_dict = "prometheus-metrics",
         })
     }
@@ -204,11 +201,13 @@ nginx_config:
 
 plugin_attr:
   tls-clienthello-limiter:
-    per_ip_rate: 2
-    per_ip_burst: 4
-    per_domain_rate: 5
-    per_domain_burst: 10
-    block_ttl: 10
+    per_ip:
+      rate: 2
+      burst: 4
+      block_ttl: 10
+    per_domain:
+      rate: 5
+      burst: 10
 ```
 
 The APISIX adapter:
@@ -217,6 +216,39 @@ The APISIX adapter:
 - builds a metrics adapter on top of APISIX Prometheus, when available
 - monkey-patches `apisix.ssl_client_hello_phase`
 - restores the original phase handler in `destroy()`
+
+## Migration from v0.1
+
+v0.2 introduces a **breaking change**: rate limits no longer have defaults and must be explicitly configured using a nested format.
+
+**Before (v0.1):**
+
+```lua
+adapter.init({
+    per_ip_rate = 2,
+    per_ip_burst = 4,
+    per_domain_rate = 5,
+    per_domain_burst = 10,
+    block_ttl = 10,
+})
+```
+
+**After (v0.2):**
+
+```lua
+adapter.init({
+    per_ip = { rate = 2, burst = 4, block_ttl = 10 },
+    per_domain = { rate = 5, burst = 10 },
+})
+```
+
+Key changes:
+
+- Flat keys (`per_ip_rate`, `per_domain_rate`, etc.) are no longer accepted. The module detects old-style config and returns a helpful error.
+- Each tier (`per_ip`, `per_domain`) is optional. You can enable one, both, or neither.
+- If a tier is present, all its fields are required.
+- Custom shared dict names (`dict_per_ip`, `dict_per_domain`, `dict_blocklist`) are removed. Dict names are now fixed constants.
+- The core `new()` signature changed from `new(opts)` to `new(opts, metrics)`.
 
 ## Metrics
 
