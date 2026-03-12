@@ -173,7 +173,10 @@ local function format_json(results)
     end
 
     local total = #results
-    local aborted_count = total - compiled_count
+    local aborted_count = 0
+    for _, r in ipairs(results) do
+        if r.status == "aborted" then aborted_count = aborted_count + 1 end
+    end
     local status = aborted_count == 0 and "pass" or "fail"
 
     local parts = {}
@@ -188,7 +191,8 @@ local function format_json(results)
         for _, a in ipairs(r.aborts) do
             abort_strs[#abort_strs + 1] = string.format(
                 '{ "reason": "%s", "location": "%s" }',
-                a.reason:gsub('"', '\\"'), a.location:gsub('"', '\\"'))
+                a.reason:gsub('\\', '\\\\'):gsub('"', '\\"'),
+                a.location:gsub('\\', '\\\\'):gsub('"', '\\"'))
         end
         local aborts_json = table.concat(abort_strs, ", ")
         parts[#parts + 1] = string.format(
@@ -245,7 +249,6 @@ local function build_paths()
         local limiter = mocks.reload_limiter()
         local lim, err = limiter.new(cfg, mocks.make_metrics())
         if not lim then error("limiter.new failed: " .. tostring(err)) end
-        lim._set_extract_client_ip = nil  -- not on instance
         limiter._set_extract_client_ip(extract_fn)
         return lim
     end
