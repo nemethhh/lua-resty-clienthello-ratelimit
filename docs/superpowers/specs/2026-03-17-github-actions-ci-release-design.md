@@ -50,11 +50,9 @@ Add GitHub Actions workflows for continuous integration and automated release pu
 #### Job 2: `publish` (needs: test)
 
 1. Checkout code
-2. Install `luarocks` CLI (via `apt-get install luarocks`)
-3. **Luarocks publish:** `luarocks upload <rockspec> --api-key $LUAROCKS_API_KEY`
-4. Install `opm` CLI: add OpenResty APT repo, install `openresty-opm` package
-5. **OPM publish:** `opm upload` using `OPM_GITHUB_TOKEN`
-6. **GitHub Release:** `gh release create` with tag and auto-generated release notes (uses the default `GITHUB_TOKEN` provided by Actions)
+2. Install `opm` CLI: add OpenResty APT repo, install `openresty-opm` package
+3. **OPM publish:** `opm upload` using `OPM_GITHUB_TOKEN`
+4. **GitHub Release:** `gh release create` with tag and auto-generated release notes (uses the default `GITHUB_TOKEN` provided by Actions)
 
 ## New Files
 
@@ -81,7 +79,6 @@ Configure in GitHub repo settings (Settings → Secrets and variables → Action
 
 | Secret | Purpose | Source |
 |--------|---------|--------|
-| `LUAROCKS_API_KEY` | luarocks.org API key for package upload | luarocks.org account settings |
 | `OPM_GITHUB_TOKEN` | Personal GitHub token for OPM auth (needs `repo` scope) | GitHub personal access token |
 
 The default `GITHUB_TOKEN` (auto-provided by Actions) is used for `gh release create`.
@@ -92,7 +89,7 @@ The default `GITHUB_TOKEN` (auto-provided by Actions) is used for `gh release cr
 2. Update `dist.ini`: `version` field
 3. Commit changes
 4. Create and push tag: `git tag v<version> && git push origin v<version>`
-5. GitHub Actions handles: version validation → full tests → bench → publish to luarocks + OPM → GitHub Release
+5. GitHub Actions handles: version validation → full tests → bench → publish to OPM → GitHub Release
 
 ## Design Decisions
 

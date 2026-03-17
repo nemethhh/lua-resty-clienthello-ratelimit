@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add GitHub Actions workflows for CI (push/PR) and release (tag) with automated publishing to luarocks and OPM.
+**Goal:** Add GitHub Actions workflows for CI (push/PR) and release (tag) with automated publishing to OPM.
 
 **Architecture:** Two separate workflow files — `ci.yml` for fast feedback on PRs/main, `release.yml` for full test suite + publish on version tags. A `dist.ini` file provides OPM metadata.
 
-**Tech Stack:** GitHub Actions, Docker Compose, luarocks CLI, OpenResty opm CLI
+**Tech Stack:** GitHub Actions, Docker Compose, OpenResty opm CLI
 
 **Spec:** `docs/superpowers/specs/2026-03-17-github-actions-ci-release-design.md`
 
@@ -177,22 +177,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract version from tag
-        id: version
-        run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
-          echo "version=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Install luarocks
-        run: sudo apt-get update && sudo apt-get install -y luarocks
-
-      - name: Publish to LuaRocks
-        env:
-          LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}
-        run: |
-          ROCKSPEC="lua-resty-clienthello-ratelimit-${{ steps.version.outputs.version }}-1.rockspec"
-          luarocks upload "$ROCKSPEC" --api-key "$LUAROCKS_API_KEY"
-
       - name: Install opm
         run: |
           wget -qO - https://openresty.org/package/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openresty.gpg
@@ -226,7 +210,7 @@ Expected: No output (valid YAML)
 
 ```bash
 git add .github/workflows/release.yml
-git commit -m "ci: add release workflow with luarocks, OPM publish, and GitHub Release"
+git commit -m "ci: add release workflow with OPM publish and GitHub Release"
 ```
 
 ---
