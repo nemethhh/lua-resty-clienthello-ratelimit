@@ -80,6 +80,10 @@ jobs:
         run: |
           opm build
           ARCHIVE=$(ls *.tar.gz | head -1)
+          if [ -z "$ARCHIVE" ]; then
+            echo "::error::No .tar.gz archive found after opm build"
+            exit 1
+          fi
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           echo "Built archive: $ARCHIVE"
 
