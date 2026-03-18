@@ -21,6 +21,7 @@ The repository includes:
 lib/resty/clienthello/ratelimit/
   init.lua        core limiter
   config.lua      config validation
+  metrics.lua     cached inc_counter builder (shared by both adapters)
   openresty.lua   OpenResty adapter
   apisix.lua      APISIX adapter
 
@@ -60,6 +61,13 @@ Shared dictionaries (names are fixed):
 | `tls-hello-per-domain` | Per-SNI rate limiter state |
 | `tls-ip-blocklist` | Auto-blocked IPs with TTL |
 
+## Tested versions
+
+| Component | Version |
+| --- | --- |
+| OpenResty | `openresty/openresty:jammy` (1.25.x) |
+| Apache APISIX | 3.15.0 |
+
 ## Requirements
 
 For local development and test execution:
@@ -83,16 +91,23 @@ Optional metrics integrations:
 
 ## Installation
 
-Install from the rockspec:
+Install via OPM:
 
 ```bash
-luarocks make
+opm get nemethhh/lua-resty-clienthello-ratelimit
 ```
 
-This publishes the following Lua modules:
+Or copy the `lib/` tree into your OpenResty/APISIX Lua path manually:
+
+```bash
+cp -r lib/resty /usr/local/openresty/lualib/
+```
+
+This provides the following Lua modules:
 
 - `resty.clienthello.ratelimit`
 - `resty.clienthello.ratelimit.config`
+- `resty.clienthello.ratelimit.metrics`
 - `resty.clienthello.ratelimit.openresty`
 - `resty.clienthello.ratelimit.apisix`
 
@@ -128,9 +143,13 @@ The optional `metrics` adapter is expected to expose:
 }
 ```
 
+The bundled `resty.clienthello.ratelimit.metrics` module provides `make_cached_inc_counter(prometheus, exptime)` which builds this adapter efficiently — prometheus counter objects and label value arrays are cached after the first call per unique name/labels pair. Both adapters use this builder internally.
+
+**Important invariant:** labels tables passed to `inc_counter` must be module-level constants (the same table reference on every call). Per-request label tables cause unbounded cache growth.
+
 ## OpenResty usage
 
-An example configuration is available in [examples/nginx.conf](/home/am/Work/cdn-harden/test-harness/examples/nginx.conf).
+An example configuration is available in [examples/nginx.conf](examples/nginx.conf).
 
 Minimal setup:
 
@@ -146,6 +165,7 @@ http {
             per_ip = { rate = 2, burst = 4, block_ttl = 10 },
             per_domain = { rate = 5, burst = 10 },
             prometheus_dict = "prometheus-metrics",
+            -- metrics_exptime = 300,  -- optional: counter TTL in seconds (default 300)
         })
     }
 
@@ -173,8 +193,8 @@ The OpenResty adapter:
 
 Example files:
 
-- [examples/apisix-config.yaml](/home/am/Work/cdn-harden/test-harness/examples/apisix-config.yaml)
-- [examples/apisix-plugin-shim.lua](/home/am/Work/cdn-harden/test-harness/examples/apisix-plugin-shim.lua)
+- [examples/apisix-config.yaml](examples/apisix-config.yaml)
+- [examples/apisix-plugin-shim.lua](examples/apisix-plugin-shim.lua)
 
 The APISIX adapter is loaded as a custom plugin shim:
 
@@ -208,6 +228,7 @@ plugin_attr:
     per_domain:
       rate: 5
       burst: 10
+    # metrics_exptime: 300  # optional: counter TTL in seconds (default: no expiry)
 ```
 
 The APISIX adapter:
@@ -281,4 +302,4 @@ The integration harness exposes these ports on the host:
 
 ## License
 
-MIT. See [LICENSE](/home/am/Work/cdn-harden/test-harness/LICENSE).
+MIT. See [LICENSE](LICENSE).

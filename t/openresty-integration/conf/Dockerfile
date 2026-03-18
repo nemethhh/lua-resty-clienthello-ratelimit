@@ -2,8 +2,7 @@ FROM openresty/openresty:jammy
 
 RUN luarocks install nginx-lua-prometheus
 
-COPY . /src
-RUN cd /src && luarocks make
+COPY lib/ /usr/local/openresty/lualib/
 
 COPY t/integration/certs/server.crt /etc/nginx/certs/server.crt
 COPY t/integration/certs/server.key /etc/nginx/certs/server.key
