@@ -6,7 +6,6 @@
 -- =============================================================================
 
 local core_mod = require("resty.clienthello.ratelimit")
-local config_mod = require("resty.clienthello.ratelimit.config")
 local apisix_core = require("apisix.core")
 local plugin = require("apisix.plugin")
 
@@ -39,44 +38,24 @@ end
 
 
 --- Build a metrics adapter that bridges to APISIX's prometheus.
-local function build_metrics_adapter()
+--- @param exptime number|nil  TTL for counter metrics from plugin_attr
+local function build_metrics_adapter(exptime)
     local ok, prometheus_mod = pcall(require, "apisix.plugins.prometheus.exporter")
     if not ok or not prometheus_mod then
         return nil
     end
 
-    local counters = {}
+    local metrics = require("resty.clienthello.ratelimit.metrics")
+    local inner_inc = nil
 
     return {
         inc_counter = function(name, labels)
-            local p = prometheus_mod.get_prometheus()
-            if not p then return end
-
-            if not counters[name] then
-                local label_names = {}
-                if labels then
-                    for k in pairs(labels) do
-                        label_names[#label_names + 1] = k
-                    end
-                    table.sort(label_names)
-                end
-                counters[name] = p:counter(name, name, label_names)
+            if not inner_inc then
+                local p = prometheus_mod.get_prometheus()
+                if not p then return end
+                inner_inc = metrics.make_cached_inc_counter(p, exptime)
             end
-
-            if labels then
-                local label_names = {}
-                for k in pairs(labels) do
-                    label_names[#label_names + 1] = k
-                end
-                table.sort(label_names)
-                local vals = {}
-                for _, k in ipairs(label_names) do
-                    vals[#vals + 1] = labels[k]
-                end
-                counters[name]:inc(1, vals)
-            else
-                counters[name]:inc(1)
-            end
+            inner_inc(name, labels)
         end,
     }
 end
@@ -86,13 +65,15 @@ function _M.init()
     -- Read plugin_attr configuration
     local attr = plugin.plugin_attr(plugin_name)
     local core_opts = {}
+    local metrics_exptime
     if attr then
         core_opts.per_ip = attr.per_ip
         core_opts.per_domain = attr.per_domain
+        metrics_exptime = attr.metrics_exptime
     end
 
     -- Build metrics adapter
-    local metrics_adapter = build_metrics_adapter()
+    local metrics_adapter = build_metrics_adapter(metrics_exptime)
 
     -- Create core limiter
     local limiter, warnings_or_err = core_mod.new(core_opts, metrics_adapter)

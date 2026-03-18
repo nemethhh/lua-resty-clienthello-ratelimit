@@ -142,3 +142,114 @@ describe("metrics.make_cached_inc_counter", function()
         assert.are.same({"a_val", "z_val"}, ic[1].labels_vals)
     end)
 end)
+
+describe("APISIX adapter: lazy prometheus + exptime", function()
+    -- These test the APISIX-specific wrapper pattern, not the shared module.
+    -- We simulate the APISIX adapter's lazy resolution inline.
+    local metrics
+
+    before_each(function()
+        helpers.setup({})
+        package.loaded["resty.clienthello.ratelimit.metrics"] = nil
+        metrics = require("resty.clienthello.ratelimit.metrics")
+    end)
+
+    it("silently no-ops when prometheus is unavailable", function()
+        local get_prometheus = function() return nil end
+        local inner_inc = nil
+
+        local inc_counter = function(name, labels)
+            if not inner_inc then
+                local p = get_prometheus()
+                if not p then return end
+                inner_inc = metrics.make_cached_inc_counter(p, nil)
+            end
+            inner_inc(name, labels)
+        end
+
+        assert.has_no.errors(function()
+            inc_counter("test_counter", {layer = "per_ip"})
+        end)
+    end)
+
+    it("caches prometheus after first successful resolution", function()
+        local p = make_prometheus_mock()
+        local call_count = 0
+        local get_prometheus = function()
+            call_count = call_count + 1
+            return p
+        end
+
+        local inner_inc = nil
+
+        local inc_counter = function(name, labels)
+            if not inner_inc then
+                local p = get_prometheus()
+                if not p then return end
+                inner_inc = metrics.make_cached_inc_counter(p, nil)
+            end
+            inner_inc(name, labels)
+        end
+
+        inc_counter("c1", {layer = "per_ip"})
+        inc_counter("c1", {layer = "per_ip"})
+        inc_counter("c1", {layer = "per_ip"})
+
+        assert.are.equal(1, call_count)
+    end)
+
+    it("retries get_prometheus after nil, then caches on success", function()
+        local p = make_prometheus_mock()
+        local call_count = 0
+        local return_nil = true
+        local get_prometheus = function()
+            call_count = call_count + 1
+            if return_nil then return nil end
+            return p
+        end
+
+        local inner_inc = nil
+
+        local inc_counter = function(name, labels)
+            if not inner_inc then
+                local pr = get_prometheus()
+                if not pr then return end
+                inner_inc = metrics.make_cached_inc_counter(pr, nil)
+            end
+            inner_inc(name, labels)
+        end
+
+        -- First call: prometheus unavailable, no-op
+        inc_counter("c1", {layer = "per_ip"})
+        assert.are.equal(1, call_count)
+        assert.are.equal(0, #p.get_counter_calls())
+
+        -- Now prometheus becomes available
+        return_nil = false
+        inc_counter("c1", {layer = "per_ip"})
+        assert.are.equal(2, call_count)
+        assert.are.equal(1, #p.get_counter_calls())
+
+        -- Third call: should NOT call get_prometheus again (cached)
+        inc_counter("c1", {layer = "per_ip"})
+        assert.are.equal(2, call_count)
+    end)
+
+    it("passes exptime from plugin_attr to counter registration", function()
+        local p = make_prometheus_mock()
+        local inner_inc = nil
+        local exptime = 300
+
+        local inc_counter = function(name, labels)
+            if not inner_inc then
+                inner_inc = metrics.make_cached_inc_counter(p, exptime)
+            end
+            inner_inc(name, labels)
+        end
+
+        inc_counter("tls_counter", {reason = "blocklist"})
+
+        local cc = p.get_counter_calls()
+        assert.are.equal(300, cc[1].exptime)
+    end)
+end)
