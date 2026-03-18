@@ -67,30 +67,25 @@ jobs:
           sudo apt-get install -y openresty-opm
 
       - name: Configure opm
-        run: echo "github_account=${{ github.repository_owner }}" > ~/.opmrc
+        run: |
+          cat > ~/.opmrc <<EOF
+          github_account=${{ github.repository_owner }}
+          github_token=${{ secrets.OPM_GITHUB_TOKEN }}
+          upload_server=https://opm.openresty.org
+          download_server=https://opm.openresty.org
+          EOF
 
-      - name: Build OPM archive
-        id: opm_build
+      - name: Build and upload package
         run: |
           opm build
-          ARCHIVE=$(ls *.tar.gz 2>/dev/null | head -1)
-          if [ -z "$ARCHIVE" ]; then
-            echo "::error::No .tar.gz archive found after opm build"
-            exit 1
-          fi
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Built archive: $ARCHIVE"
-
-      - name: Publish to OPM
-        env:
-          GITHUB_TOKEN: ${{ secrets.OPM_GITHUB_TOKEN }}
-        run: opm upload
+          opm upload
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ARCHIVE=$(ls *.tar.gz 2>/dev/null | head -1)
           gh release create "${{ github.ref_name }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes \
-            "${{ steps.opm_build.outputs.archive }}"
+            "$ARCHIVE"
