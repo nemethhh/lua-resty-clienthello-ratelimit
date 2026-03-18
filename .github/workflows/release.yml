@@ -71,9 +71,17 @@ jobs:
       - name: Install opm
         run: |
           wget -qO - https://openresty.org/package/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openresty.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/openresty.gpg] http://openresty.org/package/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/openresty.list > /dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/openresty.gpg] http://openresty.org/package/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) main" | sudo tee /etc/apt/sources.list.d/openresty.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y openresty-opm
+
+      - name: Build OPM archive
+        id: opm_build
+        run: |
+          opm build
+          ARCHIVE=$(ls *.tar.gz | head -1)
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "Built archive: $ARCHIVE"
 
       - name: Publish to OPM
         env:
@@ -86,4 +94,5 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" \
             --title "${{ github.ref_name }}" \
-            --generate-notes
+            --generate-notes \
+            "${{ steps.opm_build.outputs.archive }}"
