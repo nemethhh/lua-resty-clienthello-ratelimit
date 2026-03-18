@@ -22,6 +22,13 @@ work is redundant.
 Additionally, the APISIX adapter calls `prometheus_mod.get_prometheus()` on
 every `inc_counter` invocation — an unnecessary function call per request.
 
+**Bug: APISIX adapter omits metrics expiration.** APISIX's built-in counters
+all pass an `exptime` parameter to `prometheus:counter()`, read from
+`plugin_attr("prometheus").metrics.<name>.expire` (see `exporter.lua:157-171`,
+`:211-261`). Our APISIX adapter passes no `exptime` at all (`apisix.lua:63`),
+so `tls_clienthello_*` counters never expire — stale label combinations
+accumulate indefinitely. This must be fixed.
+
 ## Call Sites (from init.lua)
 
 All label arguments are module-level constant tables defined in `init.lua`.
@@ -137,16 +144,36 @@ end
 
 ### Hot-path inc_counter (APISIX)
 
-Same counter/val caching pattern, but with two differences:
+Same counter/val caching pattern, but with three differences:
 
 1. **Lazy prometheus resolution.** In APISIX the prometheus instance may not
    be available at plugin `init()` time due to plugin loading order
    (see `exporter.lua:173` — `prometheus` is set during `http_init`).
    The fix caches after the first successful `get_prometheus()` call.
 
-2. **No `exptime` argument.** APISIX manages counter lifecycle differently
-   from vanilla OpenResty — its `counter()` calls omit the TTL parameter.
-   This matches the current behavior.
+2. **Metrics expiration (bug fix).** The current APISIX adapter omits the
+   `exptime` parameter when calling `prometheus:counter()`. APISIX's built-in
+   counters all pass `exptime` read from `plugin_attr("prometheus")` config.
+   The fix reads `metrics_exptime` from our plugin's `plugin_attr` and passes
+   it as the 4th argument to `counter()`.
+
+   Config path: `plugin_attr.tls-clienthello-limiter.metrics_exptime`
+   Default: `nil` (no expiration, matching current behavior if unconfigured).
+
+   Example APISIX `config.yaml`:
+   ```yaml
+   plugin_attr:
+     tls-clienthello-limiter:
+       per_ip:
+         rate: 2
+         burst: 4
+         block_ttl: 10
+       metrics_exptime: 300  # seconds, matches typical APISIX expiry
+   ```
+
+3. **`metrics_exptime` passed to `build_metrics_adapter`.** The `_M.init()`
+   function reads `attr.metrics_exptime` and passes it to the adapter builder
+   so it's available at counter registration time.
 
 **Known limitation:** If APISIX calls `exporter.destroy()`, the cached
 prometheus reference becomes stale. This is acceptable because `destroy()`
@@ -156,6 +183,15 @@ not be receiving new calls.
 Full pseudocode:
 
 ```lua
+-- In _M.init():
+local attr = plugin.plugin_attr(plugin_name)
+local metrics_exptime
+if attr then
+    metrics_exptime = attr.metrics_exptime
+end
+local metrics_adapter = build_metrics_adapter(metrics_exptime)
+
+-- In build_metrics_adapter(exptime):
 local cached_prometheus = nil
 local counters = {}
 local val_cache = {}
@@ -173,7 +209,7 @@ inc_counter = function(name, labels)
             label_names = build_sorted_keys(labels)
             order_cache[labels] = label_names
         end
-        counters[name] = cached_prometheus:counter(name, name, label_names or {})
+        counters[name] = cached_prometheus:counter(name, name, label_names or {}, exptime)
     end
 
     if labels then
@@ -220,7 +256,7 @@ with zero string allocation.
 | File | Change |
 |------|--------|
 | `lib/resty/clienthello/ratelimit/openresty.lua` | Rewrite `build_metrics_adapter` with caching |
-| `lib/resty/clienthello/ratelimit/apisix.lua` | Same pattern + lazy-cached prometheus instance |
+| `lib/resty/clienthello/ratelimit/apisix.lua` | Same pattern + lazy-cached prometheus + `exptime` bug fix |
 
 ## What stays the same
 
@@ -250,3 +286,9 @@ New tests to validate caching behavior:
    `get_prometheus()` returns nil; verify no error and no crash. Then arrange
    for it to return a prometheus instance; verify subsequent calls work and
    `get_prometheus()` is not called again (spy call count == 1).
+
+5. **APISIX metrics_exptime passed to counter()** — configure
+   `metrics_exptime = 300` in plugin_attr; verify `prometheus:counter()` is
+   called with `300` as the 4th argument. Also verify that when
+   `metrics_exptime` is nil/absent, `counter()` is called with `nil`
+   (matching current no-expiry behavior).
