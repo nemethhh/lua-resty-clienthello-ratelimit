@@ -31,36 +31,11 @@ local lim  -- core limiter instance
 
 --- Build metrics adapter from nginx-lua-prometheus counters.
 local function build_metrics_adapter(prometheus, exptime)
-    local counters = {}
+    local metrics = require("resty.clienthello.ratelimit.metrics")
+    local inc_counter = metrics.make_cached_inc_counter(prometheus, exptime)
 
     return {
-        inc_counter = function(name, labels)
-            if not counters[name] then
-                local label_names = {}
-                if labels then
-                    for k in pairs(labels) do
-                        label_names[#label_names + 1] = k
-                    end
-                    table.sort(label_names)
-                end
-                counters[name] = prometheus:counter(name, name, label_names, exptime)
-            end
-
-            if labels then
-                local label_names = {}
-                for k in pairs(labels) do
-                    label_names[#label_names + 1] = k
-                end
-                table.sort(label_names)
-                local vals = {}
-                for _, k in ipairs(label_names) do
-                    vals[#vals + 1] = labels[k]
-                end
-                counters[name]:inc(1, vals)
-            else
-                counters[name]:inc(1)
-            end
-        end,
+        inc_counter = inc_counter,
     }
 end
 
