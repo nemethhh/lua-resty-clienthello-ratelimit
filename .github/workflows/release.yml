@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Extracted version: $TAG"
+
+      - name: Validate rockspec exists
+        run: |
+          ROCKSPEC="lua-resty-clienthello-ratelimit-${{ steps.version.outputs.version }}-1.rockspec"
+          if [ ! -f "$ROCKSPEC" ]; then
+            echo "::error::Rockspec not found: $ROCKSPEC"
+            exit 1
+          fi
+          echo "Found rockspec: $ROCKSPEC"
+
+      - name: Validate dist.ini version
+        run: |
+          if [ ! -f dist.ini ]; then
+            echo "::error::dist.ini not found"
+            exit 1
+          fi
+          DIST_VERSION=$(grep '^version' dist.ini | sed 's/version *= *//')
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$DIST_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::dist.ini version ($DIST_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "dist.ini version matches: $DIST_VERSION"
+
+      - name: Run unit tests
+        run: make unit
+
+      - name: Run APISIX integration tests
+        run: make integration
+
+      - name: Run OpenResty integration tests
+        run: make openresty-integration
+
+      - name: Run JIT trace benchmarks
+        run: make bench-jit
+
+      - name: Cleanup
+        if: always()
+        run: make clean
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install opm
+        run: |
+          wget -qO - https://openresty.org/package/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openresty.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/openresty.gpg] http://openresty.org/package/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/openresty.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y openresty-opm
+
+      - name: Publish to OPM
+        env:
+          GITHUB_TOKEN: ${{ secrets.OPM_GITHUB_TOKEN }}
+        run: opm upload
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
