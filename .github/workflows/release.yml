@@ -66,6 +66,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y openresty-opm
 
+      - name: Configure opm
+        run: echo "github_account=${{ github.repository_owner }}" > ~/.opmrc
+
       - name: Build OPM archive
         id: opm_build
         run: |
