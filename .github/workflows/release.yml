@@ -79,7 +79,7 @@ jobs:
         id: opm_build
         run: |
           opm build
-          ARCHIVE=$(ls *.tar.gz | head -1)
+          ARCHIVE=$(ls *.tar.gz 2>/dev/null | head -1)
           if [ -z "$ARCHIVE" ]; then
             echo "::error::No .tar.gz archive found after opm build"
             exit 1
