@@ -25,7 +25,8 @@
 |------|---------|
 | `lib/resty/clienthello/ratelimit/openresty.lua` | Replace `build_metrics_adapter` body with call to `metrics.make_cached_inc_counter` |
 | `lib/resty/clienthello/ratelimit/apisix.lua` | Replace `build_metrics_adapter` body with lazy-prometheus wrapper over `metrics.make_cached_inc_counter`; add `metrics_exptime` from `plugin_attr`; change `build_metrics_adapter` signature to accept `exptime` |
-| `lua-resty-clienthello-ratelimit-0.2.0-1.rockspec` | Add `resty.clienthello.ratelimit.metrics` module entry |
+
+Note: Rockspec update is NOT needed. Only OPM packages are released, and OPM picks up `lib/` contents automatically.
 
 ---
 
@@ -106,19 +107,7 @@ Run: `docker compose -f docker-compose.unit.yml up --build --abort-on-container-
 
 Expected: FAIL — module `resty.clienthello.ratelimit.metrics` not found.
 
-- [ ] **Step 3: Add metrics module to rockspec**
-
-In `lua-resty-clienthello-ratelimit-0.2.0-1.rockspec`, add the new module to `build.modules`:
-
-```lua
-        ["resty.clienthello.ratelimit.metrics"]   = "lib/resty/clienthello/ratelimit/metrics.lua",
-```
-
-(Add after the `resty.clienthello.ratelimit.apisix` line.)
-
-Without this, `luarocks make` (run in the unit test Docker image) will not install the module and all `require("resty.clienthello.ratelimit.metrics")` calls will fail.
-
-- [ ] **Step 4: Write minimal metrics.lua to make test pass**
+- [ ] **Step 3: Write minimal metrics.lua to make test pass**
 
 In `lib/resty/clienthello/ratelimit/metrics.lua`:
 
@@ -202,13 +191,13 @@ end
 return _M
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `docker compose -f docker-compose.unit.yml up --build --abort-on-container-exit --exit-code-from unit-tests`
 
 Expected: PASS
 
-- [ ] **Step 6: Write remaining tests**
+- [ ] **Step 5: Write remaining tests**
 
 Add to `t/unit/spec/metrics_adapter_spec.lua` (inside the same `describe` block):
 
@@ -287,16 +276,16 @@ Add to `t/unit/spec/metrics_adapter_spec.lua` (inside the same `describe` block)
     end)
 ```
 
-- [ ] **Step 7: Run all tests to verify they pass**
+- [ ] **Step 6: Run all tests to verify they pass**
 
 Run: `docker compose -f docker-compose.unit.yml up --build --abort-on-container-exit --exit-code-from unit-tests`
 
 Expected: All PASS (new tests + existing `tls_limiter_core_spec` + `config_spec`)
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add lib/resty/clienthello/ratelimit/metrics.lua t/unit/spec/metrics_adapter_spec.lua lua-resty-clienthello-ratelimit-0.2.0-1.rockspec
+git add lib/resty/clienthello/ratelimit/metrics.lua t/unit/spec/metrics_adapter_spec.lua
 git commit -m "feat: add cached metrics inc_counter builder with tests
 
 Extracts counter/label caching logic into metrics.lua. Caches counter
@@ -575,5 +564,4 @@ After all commits, run `git diff --stat <base-sha>` to confirm only these files 
 - `lib/resty/clienthello/ratelimit/metrics.lua` (new)
 - `lib/resty/clienthello/ratelimit/openresty.lua` (modified)
 - `lib/resty/clienthello/ratelimit/apisix.lua` (modified)
-- `lua-resty-clienthello-ratelimit-0.2.0-1.rockspec` (modified)
 - `t/unit/spec/metrics_adapter_spec.lua` (new)
