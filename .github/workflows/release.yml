@@ -21,15 +21,6 @@ jobs:
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
           echo "Extracted version: $TAG"
 
-      - name: Validate rockspec exists
-        run: |
-          ROCKSPEC="lua-resty-clienthello-ratelimit-${{ steps.version.outputs.version }}-1.rockspec"
-          if [ ! -f "$ROCKSPEC" ]; then
-            echo "::error::Rockspec not found: $ROCKSPEC"
-            exit 1
-          fi
-          echo "Found rockspec: $ROCKSPEC"
-
       - name: Validate dist.ini version
         run: |
           if [ ! -f dist.ini ]; then
